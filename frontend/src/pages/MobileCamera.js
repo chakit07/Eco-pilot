@@ -6,11 +6,12 @@ import { toast } from 'sonner';
 
 const getBackendUrl = () => {
     const envUrl = process.env.REACT_APP_BACKEND_URL;
+    if (envUrl) return envUrl;
     // If we are on a network address (not localhost), use that hostname for the API
     if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
         return `http://${window.location.hostname}:8000`;
     }
-    return envUrl || 'http://localhost:8000';
+    return 'http://localhost:8000';
 };
 const BACKEND_URL = getBackendUrl();
 
