@@ -199,13 +199,12 @@ async def analyze_carbon_footprint(product_name: str, category: str, details: st
         success = False
         last_err = ""
         model_names = [
+            'gemini-1.5-flash',           # Extremely reliable fallback
             'gemini-2.0-flash',           # Primary: High efficiency, speed & reasoning
-            'gemini-2.0-flash-exp',       # Experimental 2.0
-            'gemini-1.5-flash',           # Reliable fallback
             'gemini-1.5-pro',            # High-accuracy fallback
-            'models/gemini-2.0-flash',
             'models/gemini-1.5-flash',
-            'gemini-pro'
+            'models/gemini-2.0-flash',
+            'gemini-2.0-flash-exp'
         ]
         
         for model_name in model_names:
@@ -245,12 +244,12 @@ async def analyze_carbon_footprint(product_name: str, category: str, details: st
                 pass
                 
         if not success:
-            raise Exception(f"All models failed. Last error: {last_err}")
+            raise Exception(f"All analysis models failed. Last attempted: {model_names[-1]}. Error: {last_err}")
             
     except Exception as e:
         logger.error(f"Gemini Analysis Error: {str(e)}")
         # Dynamic fallback
-        response_text = f"CARBON: 1.5\nBREAKDOWN: Manufacturing 60% | Transport 20% | Usage 10% | Disposal 10%\nECO_SCORE: 50\nALTERNATIVES: Alternative for {product_name} | Eco Choice 2\nIMPACT: Analysis temporarily unavailable for {product_name}. Error: {str(e)[:50]}"
+        response_text = f"CARBON: 1.5\nBREAKDOWN: Manufacturing 60% | Transport 20% | Usage 10% | Disposal 10%\nECO_SCORE: 50\nALTERNATIVES: Alternative for {product_name} | Eco Choice 2\nIMPACT: Analysis temporarily unavailable for {product_name}. Trace: {str(e)[:100]}"
 
     # Parse response
     logger.info(f"Carbon Analysis Response: {response_text}")
@@ -362,12 +361,12 @@ async def analyze_image(image_base64: str) -> dict:
         last_err = ""
         image_data = base64.b64decode(image_base64)
         model_names = [
+            'gemini-1.5-flash',           # Fast & reliable vision
             'gemini-2.0-flash',           # Omni-capable vision
-            'gemini-1.5-flash',           # Fast fallback
-            'gemini-2.0-flash-exp',       # Experimental
             'gemini-1.5-pro',            # Complex detail fallback
+            'models/gemini-1.5-flash',
             'models/gemini-2.0-flash',
-            'models/gemini-1.5-flash'
+            'gemini-2.0-flash-exp'
         ]
         
         for model_name in model_names:
@@ -414,12 +413,12 @@ async def analyze_image(image_base64: str) -> dict:
                 pass
 
         if not success:
-            raise Exception(f"All vision models failed. Last error: {last_err}")
+            raise Exception(f"All vision models failed. Last attempted: {model_names[-1]}. Error: {last_err}")
             
     except Exception as e:
         logger.error(f"Gemini image analysis failed: {e}")
         # Fallback values if API fails
-        response_text = f"PRODUCT: Unknown Image | CATEGORY: other | DETAILS: Analysis failed: {str(e)[:50]} | ALTERNATIVES: Eco Choice 1 | Eco Choice 2"
+        response_text = f"PRODUCT: Unknown Image | CATEGORY: other | DETAILS: Analysis failed: {str(e)[:100]} | ALTERNATIVES: Eco Choice 1 | Eco Choice 2"
 
     # Parse response
     logger.info(f"AI Image Analysis Response: {response_text}")
