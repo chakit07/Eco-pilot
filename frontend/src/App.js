@@ -13,11 +13,17 @@ import MobileScanner from './pages/MobileScanner';
 
 const getBackendUrl = () => {
   const envUrl = process.env.REACT_APP_BACKEND_URL;
-  // If we are on a network address (not localhost), use that hostname for the API
+
+  // 1. If we have a backend URL set in Vercel/Render, use it first!
+  if (envUrl) return envUrl;
+
+  // 2. Fallback for mobile testing on local network (e.g. 192.168...)
   if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
     return `http://${window.location.hostname}:8000`;
   }
-  return envUrl || 'http://localhost:8000';
+
+  // 3. Absolute fallback
+  return 'http://localhost:8000';
 };
 
 const BACKEND_URL = getBackendUrl();
