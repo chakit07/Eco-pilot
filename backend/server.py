@@ -247,9 +247,13 @@ async def analyze_carbon_footprint(product_name: str, category: str, details: st
             raise Exception(f"All analysis models failed. Last attempted: {model_names[-1]}. Error: {last_err}")
             
     except Exception as e:
-        logger.error(f"Gemini Analysis Error: {str(e)}")
+        err_msg = str(e)
+        logger.error(f"Gemini Analysis Error: {err_msg}")
+        if "429" in err_msg:
+            err_msg = "Quota exceeded (429). Please wait a minute or use a different API key."
+        
         # Dynamic fallback
-        response_text = f"CARBON: 1.5\nBREAKDOWN: Manufacturing 60% | Transport 20% | Usage 10% | Disposal 10%\nECO_SCORE: 50\nALTERNATIVES: Alternative for {product_name} | Eco Choice 2\nIMPACT: Analysis temporarily unavailable for {product_name}. Trace: {str(e)[:100]}"
+        response_text = f"CARBON: 1.5\nBREAKDOWN: Manufacturing 60% | Transport 20% | Usage 10% | Disposal 10%\nECO_SCORE: 50\nALTERNATIVES: Alternative for {product_name} | Eco Choice 2\nIMPACT: Analysis temporarily unavailable. {err_msg[:100]}"
 
     # Parse response
     logger.info(f"Carbon Analysis Response: {response_text}")
@@ -416,9 +420,13 @@ async def analyze_image(image_base64: str) -> dict:
             raise Exception(f"All vision models failed. Last attempted: {model_names[-1]}. Error: {last_err}")
             
     except Exception as e:
-        logger.error(f"Gemini image analysis failed: {e}")
+        err_msg = str(e)
+        logger.error(f"Gemini image analysis failed: {err_msg}")
+        if "429" in err_msg:
+            err_msg = "Quota exceeded (429). Gemini API is rate-limiting this request."
+            
         # Fallback values if API fails
-        response_text = f"PRODUCT: Unknown Image | CATEGORY: other | DETAILS: Analysis failed: {str(e)[:100]} | ALTERNATIVES: Eco Choice 1 | Eco Choice 2"
+        response_text = f"PRODUCT: Unknown Image | CATEGORY: other | DETAILS: Analysis failed: {err_msg[:100]} | ALTERNATIVES: Eco Choice 1 | Eco Choice 2"
 
     # Parse response
     logger.info(f"AI Image Analysis Response: {response_text}")
@@ -586,6 +594,9 @@ async def analyze_photo(file: UploadFile = File(...), current_user: User = Depen
     
     # Analyze image
     result = await analyze_image(image_base64)
+    
+    # Small delay to avoid 429 on free tier (15 RPM / 2 = 7.5 photos/min)
+    await asyncio.sleep(1.2)
     
     # Get carbon analysis
     carbon_analysis = await analyze_carbon_footprint(
