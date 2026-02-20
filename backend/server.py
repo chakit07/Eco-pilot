@@ -335,6 +335,102 @@ async def analyze_carbon_footprint(product_name: str, category: str, details: st
 
     return result
 
+async def analyze_image_unified(image_base64: str, region: str = "Global", lifestyle: str = "General") -> dict:
+    """Simplified Vision & Carbon Analysis in a single API call to save quota and time"""
+    prompt = f"""You are EcoCalc AI Unified — an Environmental Scientist and Vision Expert.
+    
+    CRITICAL CAPABILITY: Analyze the image and provide identification + carbon data in ONE go.
+    
+    INSTRUCTIONS:
+    - BEYOND PRODUCTS: If the image is a scene, land-type, or activity, analyze its environmental role.
+    - MATH PRECISION: Always show a calculation (Activity x Factor).
+    - REGIONAL SENSITIVITY: Consider electricity grid intensity for {region}.
+
+    Return your response in this exact format (STRICT):
+    PRODUCT: [Identified Subject]
+    CATEGORY: [electronics, clothing, food, home, vehicle, beauty, sports, books, or 'other']
+    DETAILS: [Scientific description]
+    CARBON: [Numeric value in kg CO2e]
+    BREAKDOWN: Manufacturing [X]% | Transport [Y]% | Usage [Z]% | Disposal [W]%
+    ECO_SCORE: [0-100 rating]
+    ALTERNATIVES: [Insight 1] | [Insight 2] | [Insight 3]
+    IMPACT:
+    1. Key Observation: [Impact summary]
+    2. Deep Insight: [Scientific fact about this specific item]
+    3. Sustainable Shift: [A specific behavioral improvement]
+    
+    DETAILED_MATH: [(Weight/Usage * Emission Factor) = result]
+    """
+
+    try:
+        success = False
+        last_err = ""
+        image_data = base64.b64decode(image_base64)
+        model_names = ['gemini-1.5-flash', 'gemini-2.0-flash', 'models/gemini-1.5-flash']
+        
+        for model_name in model_names:
+            try:
+                model = genai.GenerativeModel(model_name)
+                response = await asyncio.to_thread(
+                    model.generate_content,
+                    [prompt, {'mime_type': 'image/jpeg', 'data': image_data}]
+                )
+                response_text = response.text
+                if "```" in response_text:
+                    response_text = re.sub(r'```[a-zA-Z]*\n?', '', response_text).strip()
+                success = True
+                break
+            except Exception as e:
+                last_err = str(e)
+                if "404" in last_err: continue
+                if "429" in last_err: break
+                raise e
+        
+        if not success:
+            raise Exception(f"Analysis failed. {last_err}")
+            
+    except Exception as e:
+        err_msg = str(e)
+        logger.error(f"Unified analysis failed: {err_msg}")
+        # Fallback
+        response_text = f"PRODUCT: Unknown | CATEGORY: other | DETAILS: {err_msg[:50]} | CARBON: 1.0 | BREAKDOWN: Unknown 100% | ECO_SCORE: 50 | ALTERNATIVES: Alt 1 | IMPACT: 1. Error: {err_msg[:50]} | DETAILED_MATH: N/A"
+
+    # Parse response (using existing robust logic)
+    def extract_section(name, text):
+        pattern = rf"{name}:\s*(.*?)(?=\n[A-Z_]+:|$)"
+        match = re.search(pattern, text, re.S | re.I)
+        return match.group(1).strip() if match else ""
+
+    result = {
+        'product_name': extract_section("PRODUCT", response_text) or 'Unknown',
+        'category': extract_section("CATEGORY", response_text).lower() or 'other',
+        'details': extract_section("DETAILS", response_text),
+        'carbon_footprint': 1.0,
+        'eco_score': 50,
+        'alternatives': [],
+        'impact': extract_section("IMPACT", response_text),
+        'breakdown': {},
+        'calculation': extract_section("DETAILED_MATH", response_text)
+    }
+
+    # Fix category
+    if result['category'] not in ['electronics', 'clothing', 'food', 'home', 'vehicle', 'beauty', 'sports', 'books', 'other']:
+        result['category'] = 'other'
+
+    # Fix Carbon
+    try: result['carbon_footprint'] = float(re.search(r'[\d\.]+', extract_section("CARBON", response_text)).group())
+    except: pass
+
+    # Fix Eco Score
+    try: result['eco_score'] = int(re.search(r'\d+', extract_section("ECO_SCORE", response_text)).group())
+    except: pass
+
+    # Alternatives
+    alts_str = extract_section("ALTERNATIVES", response_text)
+    if alts_str: result['alternatives'] = [a.strip() for a in re.split(r'[|\n]', alts_str) if a.strip()]
+
+    return result
+
 async def analyze_image(image_base64: str) -> dict:
     """Use AI vision to analyze ANY image with hyper-efficiency"""
     prompt = """You are EcoCalc AI Vision — an advanced Omni-Scanner for environmental impacts.
@@ -592,35 +688,14 @@ async def analyze_photo(file: UploadFile = File(...), current_user: User = Depen
     contents = await file.read()
     image_base64 = base64.b64encode(contents).decode('utf-8')
     
-    # Analyze image
-    result = await analyze_image(image_base64)
-    
-    # Small delay to avoid 429 on free tier (15 RPM / 2 = 7.5 photos/min)
-    await asyncio.sleep(1.2)
-    
-    # Get carbon analysis
-    carbon_analysis = await analyze_carbon_footprint(
-        result['product_name'],
-        result['category'],
-        result['details'],
+    # Perform Unified Analysis in ONE call to save quota
+    analysis = await analyze_image_unified(
+        image_base64,
         region=current_user.region,
         lifestyle=current_user.lifestyle_type
     )
     
-    # Merge results
-    # Use alternatives from carbon analysis if they are better (not fallback)
-    # or if result['alternatives'] is empty
-    if not result.get('alternatives') or (carbon_analysis.get('alternatives') and "Eco Choice" not in carbon_analysis['alternatives'][0]):
-        # Keep carbon_analysis alternatives
-        pass
-    else:
-        # Use image analysis alternatives if carbon ones look like fallback
-        carbon_analysis['alternatives'] = result.get('alternatives', [])
-
-    return {
-        **result,
-        **carbon_analysis
-    }
+    return analysis
 
 @api_router.get("/dashboard/stats")
 async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
