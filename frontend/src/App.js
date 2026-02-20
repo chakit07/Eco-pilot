@@ -8,8 +8,19 @@ import Dashboard from './pages/Dashboard';
 import PrePurchase from './pages/PrePurchase';
 import PostPurchase from './pages/PostPurchase';
 import ImpactDashboard from './pages/ImpactDashboard';
+import MobileCamera from './pages/MobileCamera';
+import MobileScanner from './pages/MobileScanner';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+const getBackendUrl = () => {
+  const envUrl = process.env.REACT_APP_BACKEND_URL;
+  // If we are on a network address (not localhost), use that hostname for the API
+  if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+    return `http://${window.location.hostname}:8000`;
+  }
+  return envUrl || 'http://localhost:8000';
+};
+
+const BACKEND_URL = getBackendUrl();
 const API = `${BACKEND_URL}/api`;
 
 export const api = axios.create({
@@ -72,6 +83,8 @@ function App() {
               </ProtectedRoute>
             }
           />
+          <Route path="/mobile-upload/:sessionId" element={<MobileCamera />} />
+          <Route path="/mobile-scanner/:sessionId" element={<MobileScanner />} />
         </Routes>
       </BrowserRouter>
     </div>

@@ -35,6 +35,16 @@ const webpackConfig = {
       '@': path.resolve(__dirname, 'src'),
     },
     configure: (webpackConfig) => {
+      console.log('Craco: configuring webpack...');
+
+      // Force alias configuration
+      webpackConfig.resolve = {
+        ...webpackConfig.resolve,
+        alias: {
+          ...webpackConfig.resolve?.alias,
+          '@': path.resolve(__dirname, 'src'),
+        },
+      };
 
       // Disable hot reload completely if environment variable is set
       if (config.disableHotReload) {
@@ -67,6 +77,14 @@ const webpackConfig = {
       if (config.enableHealthCheck && healthPluginInstance) {
         webpackConfig.plugins.push(healthPluginInstance);
       }
+
+      // Ignore source map warnings from node_modules (e.g. html5-qrcode)
+      webpackConfig.ignoreWarnings = [
+        /Failed to parse source map/,
+        {
+          module: /node_modules\/html5-qrcode/,
+        },
+      ];
 
       return webpackConfig;
     },

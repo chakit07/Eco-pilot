@@ -1,20 +1,28 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, File, UploadFile, Form
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from dotenv import load_dotenv
-from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
-import os
+import asyncio
+import base64
 import logging
-from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Optional
+import os
+import tempfile
 import uuid
-from datetime import datetime, timezone, timedelta
+import re
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import List, Optional
+
 import bcrypt
 import jwt
-from emergentintegrations.llm.chat import LlmChat, UserMessage, FileContentWithMimeType, ImageContent
-import base64
-import tempfile
+import google.generativeai as genai
+from dotenv import load_dotenv
+
+# Initialize logger
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+from fastapi import (APIRouter, Depends, FastAPI, File, Form, HTTPException,
+                     UploadFile)
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from motor.motor_asyncio import AsyncIOMotorClient
+from pydantic import BaseModel, ConfigDict, Field
+from starlette.middleware.cors import CORSMiddleware
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -29,8 +37,35 @@ JWT_SECRET = os.environ.get('JWT_SECRET_KEY', 'your-secret-key')
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_HOURS = 72
 
+# AI Client Configuration (Now using Google Gemini)
+api_key = os.environ.get('GOOGLE_API_KEY')
+if not api_key or api_key == 'YOUR_GEMINI_API_KEY_HERE':
+    logger.error("GOOGLE_API_KEY is not set correctly in .env file")
+genai.configure(api_key=api_key)
+
+# Log available models to debug 404 issues
+try:
+    available_models = [m.name for m in genai.list_models()]
+    logger.info(f"Available Gemini models: {available_models}")
+except Exception as e:
+    logger.error(f"Could not list Gemini models: {e}")
+
+# We'll initialize models inside the functions for better flexibility
+
 # Create the main app
 app = FastAPI()
+
+# CORS Configuration
+cors_origins = os.environ.get('CORS_ORIGINS', 'http://localhost:3000,http://127.0.0.1:3000,http://192.168.1.15:3000').split(',')
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 api_router = APIRouter(prefix="/api")
 security = HTTPBearer()
 
@@ -70,6 +105,8 @@ class ProductLog(BaseModel):
     carbon_footprint: Optional[float] = None
     eco_score: Optional[int] = None
     recommendations: Optional[List[str]] = None
+    environmental_impact: Optional[str] = None
+    carbon_breakdown: Optional[dict] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class ProductLogCreate(BaseModel):
@@ -119,115 +156,346 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     except Exception as e:
         raise HTTPException(status_code=401, detail="Invalid token")
 
-async def analyze_carbon_footprint(product_name: str, category: str, details: str = "") -> dict:
-    """Use AI to analyze carbon footprint"""
-    api_key = os.environ.get('EMERGENT_LLM_KEY')
+async def analyze_carbon_footprint(product_name: str, category: str, details: str = "", region: str = "Global", lifestyle: str = "General") -> dict:
+    """Use AI to analyze carbon footprint using GHG Protocol standards"""
+
+    prompt = f"""You are EcoCalc AI — an Environmental Impact Scientist and Wisdom Consultant.
+    Your mission is to provide DEEP ENVIRONMENTAL INSIGHTS, carbon data, and GENUINE WISDOM for whatever subject is presented.
     
-    system_message = """You are an expert in carbon footprint analysis and environmental sustainability. 
-    Analyze products and provide:
-    1. Estimated carbon footprint in kg CO2
-    2. Eco score (0-100, where 100 is most eco-friendly)
-    3. Three specific eco-friendly alternatives
-    4. Brief explanation of environmental impact
-    
-    Return your response in this exact format:
-    CARBON: [number]
-    ECO_SCORE: [number]
-    ALTERNATIVES: [alt1] | [alt2] | [alt3]
-    IMPACT: [brief explanation]
+    CRITICAL INSTRUCTIONS:
+    - BEYOND PRODUCTS: If the subject is a scene, activity, or land-type, analyze its environmental role (e.g., carbon sink potential, biodiversity value, or indirect climate contribution).
+    - SCIENTIFIC LENS: Use GHG Protocol for footprints, but use Ecological Science for "random things" (e.g., Albedo effects, particulate matter, soil health).
+    - ACTIONABLE WISDOM: Don't just give suggestions - provide environmental perspectives that empower the user's worldview.
+    - MATH PRECISION: Always show a calculation, even if it's an estimation based on a scene's scale.
+
+    STEP 1 — Object Identification: Identify the exact item/activity.
+    STEP 2 — Unit Conversion: Convert to kilograms, kWh, km, or passenger-kms.
+    STEP 3 — Factor Mapping: Cite the specific database source (e.g., "DEFRA 2023 Factor: 0.17kg/km").
+    STEP 4 — Calculation: Show the formula and the final result.
+    STEP 5 — Better Alternative: Provide a real, shoppable, or actionable alternative with its estimated % reduction.
+
+    Response Format (STRICT):
+    CARBON: [Numeric value only in kg CO2e, e.g., 12.45]
+    BREAKDOWN: Manufacturing [X]% | Transport [Y]% | Usage [Z]% | Disposal [W]%
+    ECO_SCORE: [0-100 rating]
+    ALTERNATIVES: [Alternative 1] | [Alternative 2] | [Alternative 3]
+    IMPACT:
+    1. Detected Item: [Exact name]
+    2. Assumptions: [Weight/Distance/Usage assumed]
+    3. Data Source: [Specific standard/year cited]
+    4. Why it emits: [Scientific explanation]
+    5. Better Choice: [Genuine product/service]
+    6. Expected Saving: [Calculation for the alternative]
+    7. Carbon Saved: [% reduction]
+
+    DETAILED_MATH: [Equation used: e.g., (150km * 0.12kg/km) = 18kg CO2e]
+
+    TASK: Analyze carbon for: Product: {product_name}, Category: {category}, Details: {details}.
     """
-    
-    chat = LlmChat(
-        api_key=api_key,
-        session_id=f"carbon_{uuid.uuid4()}",
-        system_message=system_message
-    ).with_model("openai", "gpt-4o-mini")
-    
-    user_message = UserMessage(
-        text=f"Analyze carbon footprint for: Category: {category}, Product: {product_name}, Details: {details}"
-    )
-    
-    response = await chat.send_message(user_message)
-    
+
+    try:
+        # Robust model selection: prioritized for efficiency and speed
+        # Gemini 2.0 Flash is currently the fastest and most efficient for these tasks
+        success = False
+        last_err = ""
+        model_names = [
+            'gemini-2.0-flash',           # Primary: High efficiency, speed & reasoning
+            'gemini-2.0-flash-exp',       # Experimental 2.0
+            'gemini-1.5-flash',           # Reliable fallback
+            'gemini-1.5-pro',            # High-accuracy fallback
+            'models/gemini-2.0-flash',
+            'models/gemini-1.5-flash',
+            'gemini-pro'
+        ]
+        
+        for model_name in model_names:
+            try:
+                model = genai.GenerativeModel(model_name)
+                response = await asyncio.to_thread(model.generate_content, prompt)
+                response_text = response.text
+                
+                # Check for markdown blocks
+                if "```" in response_text:
+                    response_text = re.sub(r'```[a-zA-Z]*\n?', '', response_text).strip()
+                
+                success = True
+                logger.info(f"Success with model: {model_name}")
+                break
+            except Exception as e:
+                last_err = str(e)
+                if "404" in last_err or "unsupported" in last_err.lower():
+                    logger.warning(f"Model {model_name} failed: {last_err}")
+                    continue
+                else:
+                    raise e
+        
+        if not success:
+            # Final attempt: list models and try the first one that supports generateContent
+            try:
+                available = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+                if available:
+                    logger.info(f"Trying first available model: {available[0]}")
+                    model = genai.GenerativeModel(available[0])
+                    response = await asyncio.to_thread(model.generate_content, prompt)
+                    response_text = response.text
+                    if "```" in response_text:
+                        response_text = re.sub(r'```[a-zA-Z]*\n?', '', response_text).strip()
+                    success = True
+            except:
+                pass
+                
+        if not success:
+            raise Exception(f"All models failed. Last error: {last_err}")
+            
+    except Exception as e:
+        logger.error(f"Gemini Analysis Error: {str(e)}")
+        # Dynamic fallback
+        response_text = f"CARBON: 1.5\nBREAKDOWN: Manufacturing 60% | Transport 20% | Usage 10% | Disposal 10%\nECO_SCORE: 50\nALTERNATIVES: Alternative for {product_name} | Eco Choice 2\nIMPACT: Analysis temporarily unavailable for {product_name}. Error: {str(e)[:50]}"
+
     # Parse response
-    lines = response.strip().split('\n')
+    logger.info(f"Carbon Analysis Response: {response_text}")
+    
     result = {
         'carbon_footprint': 0.0,
         'eco_score': 50,
         'alternatives': [],
-        'impact': ''
+        'impact': '',
+        'impact_details': [],
+        'breakdown': {},
+        'calculation': ''
     }
+
     
-    for line in lines:
-        if line.startswith('CARBON:'):
-            try:
-                result['carbon_footprint'] = float(line.split(':')[1].strip())
-            except:
-                result['carbon_footprint'] = 10.0
-        elif line.startswith('ECO_SCORE:'):
-            try:
-                result['eco_score'] = int(line.split(':')[1].strip())
-            except:
-                result['eco_score'] = 50
-        elif line.startswith('ALTERNATIVES:'):
-            alts = line.split(':')[1].strip().split('|')
-            result['alternatives'] = [alt.strip() for alt in alts]
-        elif line.startswith('IMPACT:'):
-            result['impact'] = line.split(':')[1].strip()
+    # Helper to extract section content
+    def extract_section(name, text):
+        pattern = rf"{name}:\s*(.*?)(?=\n[A-Z_]+:|$)"
+        match = re.search(pattern, text, re.S | re.I)
+        return match.group(1).strip() if match else ""
+
+    # Carbon
+    carbon_str = extract_section("CARBON", response_text)
+    try:
+        result['carbon_footprint'] = float(re.search(r'[\d\.]+', carbon_str).group())
+    except:
+        result['carbon_footprint'] = 1.0
+
+    # Eco Score
+    score_str = extract_section("ECO_SCORE", response_text)
+    try:
+        result['eco_score'] = int(re.search(r'\d+', score_str).group())
+    except:
+        result['eco_score'] = 50
+
+    # Breakdown
+    breakdown_str = extract_section("BREAKDOWN", response_text)
+    if breakdown_str:
+        try:
+            parts = breakdown_str.split('|')
+            for part in parts:
+                subparts = part.strip().split()
+                if len(subparts) >= 2:
+                    label = subparts[0]
+                    value = re.search(r'\d+', subparts[1])
+                    if value:
+                        result['breakdown'][label] = float(value.group())
+        except:
+            pass
+
+    # Alternatives
+    alts_str = extract_section("ALTERNATIVES", response_text)
+    if alts_str:
+        # Split by | or newline or bullet points
+        alts = [a.strip('- ').strip() for a in re.split(r'[|\n]', alts_str) if a.strip()]
+        result['alternatives'] = [a for a in alts if a and len(a) > 2]
+
+    # Impact
+    impact_text = extract_section("IMPACT", response_text)
+    result['impact'] = impact_text
     
+    # Parse impact details into list of {title, content}
+    try:
+        # Split by "N. Label:"
+        points = re.split(r'(\d+\.\s+[^:]+:)', impact_text)
+        details = []
+        if len(points) > 1:
+            for i in range(1, len(points), 2):
+                title = points[i].strip()
+                # Remove number from title if needed, but let's keep it for now
+                content = points[i+1].strip() if i+1 < len(points) else ""
+                if title and content:
+                    details.append({"title": title, "content": content})
+        result['impact_details'] = details
+    except:
+        result['impact_details'] = []
+    # DETAILED_MATH
+    result['calculation'] = extract_section("DETAILED_MATH", response_text)
+
     return result
 
-async def analyze_image(image_base64: str) -> dict:
-    """Use AI vision to analyze product image"""
-    api_key = os.environ.get('EMERGENT_LLM_KEY')
+async def analyze_image_unified(image_base64: str, region: str = "Global", lifestyle: str = "General") -> dict:
+    """Unified Vision & Carbon Analysis in a single API call to save quota and time"""
+    prompt = f"""You are EcoCalc AI Vision — an Environmental Impact Scientist and Wisdom Consultant.
     
-    system_message = """You are an expert in product identification. 
-    Analyze the image and identify:
-    1. Product name
-    2. Product category (product or vehicle)
-    3. Key details about the product
+    CRITICAL CAPABILITY: You can analyze ANY image. Whether it's a specific product, a wide landscape, a person, or a complex indoor scene, you must extract environmental meaning and carbon data.
     
-    Return your response in this exact format:
-    PRODUCT: [product name]
-    CATEGORY: [product or vehicle]
-    DETAILS: [key details]
+    MISSION: Identify the subject and provide DEEP ENVIRONMENTAL INSIGHTS, carbon data, and GENUINE WISDOM.
+    
+    INSTRUCTIONS:
+    - BEYOND PRODUCTS: If the image is a scene, land-type, or activity, analyze its environmental role (e.g., carbon sink potential, biodiversity, or urban footprint).
+    - SCIENTIFIC LENS: Use GHG Protocol for footprints, but use Ecological Science for "random things" (e.g., Albedo effects, particulate matter, soil health).
+    - MATH PRECISION: Always show a calculation (Activity x Factor) based on visual estimation of scale/usage.
+    - REGIONAL SENSITIVITY: Consider electricity grid intensity and transport logistics for {region}.
+
+    Return your response in this exact format (STRICT):
+    PRODUCT: [Identified Subject]
+    CATEGORY: [electronics, clothing, food, home, vehicle, beauty, sports, books, or 'other']
+    DETAILS: [Scientific description for identification]
+    CARBON: [Numeric value in kg CO2e, or 0 if it's a carbon sink]
+    BREAKDOWN: Phase A [X]% | Phase B [Y]% | Phase C [Z]% | Phase D [W]%
+    ECO_SCORE: [0-100 rating]
+    ALTERNATIVES: [Insight/Action 1] | [Insight/Action 2] | [Insight/Action 3]
+    IMPACT:
+    1. Key Observation: [What makes this subject environmentally significant?]
+    2. Context & Scale: [The scope seen in this specific image]
+    3. Deep Insight: [A specialized scientific/ecological fact related to this image]
+    4. Why it matters: [The 'Wisdom' - explaining the long-term planetary impact]
+    5. Sustainable Shift: [A specific behavioral or systemic improvement]
+    6. Expected Saving: [The estimated impact of making that shift]
+    7. Climate Perspective: [A philosophical or broad environmental takeaway]
+
+    DETAILED_MATH: [The logic used to reach the footprint/score]
     """
-    
-    chat = LlmChat(
-        api_key=api_key,
-        session_id=f"vision_{uuid.uuid4()}",
-        system_message=system_message
-    ).with_model("openai", "gpt-4o-mini")
-    
-    image_content = ImageContent(image_base64=image_base64)
-    
-    user_message = UserMessage(
-        text="Identify this product and provide details.",
-        file_contents=[image_content]
-    )
-    
-    response = await chat.send_message(user_message)
-    
+
+    try:
+        success = False
+        last_err = ""
+        image_data = base64.b64decode(image_base64)
+        model_names = [
+            'gemini-2.0-flash',           # Omni-capable vision
+            'gemini-1.5-flash',           # Fast fallback
+            'gemini-2.0-flash-exp',       # Experimental
+            'gemini-1.5-pro',            # Complex detail fallback
+            'models/gemini-2.0-flash',
+            'models/gemini-1.5-flash'
+        ]
+        
+        for model_name in model_names:
+            try:
+                model = genai.GenerativeModel(model_name)
+                response = await asyncio.to_thread(
+                    model.generate_content,
+                    [prompt, {'mime_type': 'image/jpeg', 'data': image_data}]
+                )
+                response_text = response.text
+                if "```" in response_text:
+                    response_text = re.sub(r'```[a-zA-Z]*\n?', '', response_text).strip()
+                success = True
+                logger.info(f"Success with unified vision model: {model_name}")
+                break
+            except Exception as e:
+                last_err = str(e)
+                if "429" in last_err:
+                    logger.warning(f"Rate limited on {model_name}. Trying next...")
+                    continue
+                if "404" in last_err:
+                    logger.warning(f"Model {model_name} failed: {last_err}")
+                    continue
+                else:
+                    raise e
+                    
+        if not success:
+            raise Exception(f"All vision models failed. Last error: {last_err}")
+            
+    except Exception as e:
+        logger.error(f"Gemini unified analysis failed: {e}")
+        # Fallback values if API fails
+        response_text = f"PRODUCT: Unknown Image | CATEGORY: other | DETAILS: Analysis failed: {str(e)[:50]}\nCARBON: 1.0\nBREAKDOWN: Unknown 100%\nECO_SCORE: 50\nALTERNATIVES: Eco Choice 1 | Eco Choice 2\nIMPACT: 1. Error: {str(e)[:50]}"
+
     # Parse response
-    lines = response.strip().split('\n')
+    logger.info(f"AI Unified Analysis Response: {response_text}")
+    
     result = {
         'product_name': 'Unknown Product',
-        'category': 'product',
-        'details': ''
+        'category': 'other',
+        'details': '',
+        'carbon_footprint': 0.0,
+        'eco_score': 50,
+        'alternatives': [],
+        'impact': '',
+        'impact_details': [],
+        'breakdown': {},
+        'calculation': ''
     }
+
+    import re
     
-    for line in lines:
-        if line.startswith('PRODUCT:'):
-            result['product_name'] = line.split(':')[1].strip()
-        elif line.startswith('CATEGORY:'):
-            cat = line.split(':')[1].strip().lower()
-            if 'vehicle' in cat:
-                result['category'] = 'vehicle'
-            else:
-                result['category'] = 'product'
-        elif line.startswith('DETAILS:'):
-            result['details'] = line.split(':')[1].strip()
+    def extract_section(name, text):
+        pattern = rf"{name}:\s*(.*?)(?=\n[A-Z_]+:|$)"
+        match = re.search(pattern, text, re.S | re.I)
+        return match.group(1).strip() if match else ""
+
+    result['product_name'] = extract_section("PRODUCT", response_text) or 'Unknown Image'
+    result['details'] = extract_section("DETAILS", response_text)
     
+    # Category parsing
+    cat = extract_section("CATEGORY", response_text).lower()
+    valid_cats = ['electronics', 'clothing', 'food', 'home', 'vehicle', 'beauty', 'sports', 'books', 'other']
+    result['category'] = next((c for c in valid_cats if c in cat), 'other')
+
+    # Carbon
+    carbon_str = extract_section("CARBON", response_text)
+    try:
+        result['carbon_footprint'] = float(re.search(r'[\d\.]+', carbon_str).group())
+    except:
+        result['carbon_footprint'] = 1.0
+
+    # Eco Score
+    score_str = extract_section("ECO_SCORE", response_text)
+    try:
+        result['eco_score'] = int(re.search(r'\d+', score_str).group())
+    except:
+        result['eco_score'] = 50
+
+    # Breakdown
+    breakdown_str = extract_section("BREAKDOWN", response_text)
+    if breakdown_str:
+        try:
+            parts = breakdown_str.split('|')
+            for part in parts:
+                subparts = part.strip().split()
+                if len(subparts) >= 2:
+                    label = " ".join([s for s in subparts if not s[0].isdigit()])
+                    value = re.search(r'\d+', part)
+                    if value:
+                        result['breakdown'][label] = float(value.group())
+        except:
+            pass
+
+    # Alternatives
+    alts_str = extract_section("ALTERNATIVES", response_text)
+    if alts_str:
+        result['alternatives'] = [a.strip('- ').strip() for a in re.split(r'[|\n]', alts_str) if a.strip()]
+
+    # Impact
+    impact_text = extract_section("IMPACT", response_text)
+    result['impact'] = impact_text
+    
+    # Parse impact details
+    try:
+        points = re.split(r'(\d+\.\s+[^:]+:)', impact_text)
+        details = []
+        if len(points) > 1:
+            for i in range(1, len(points), 2):
+                title = points[i].strip()
+                content = points[i+1].strip() if i+1 < len(points) else ""
+                if title and content:
+                    details.append({"title": title, "content": content})
+        result['impact_details'] = details
+    except:
+        pass
+
+    result['calculation'] = extract_section("DETAILED_MATH", response_text)
+
     return result
 
 # Routes
@@ -293,12 +561,16 @@ async def create_product_log(log_data: ProductLogCreate, current_user: User = De
     analysis = await analyze_carbon_footprint(
         log_data.product_name,
         log_data.category,
-        log_data.product_details or ""
+        log_data.product_details or "",
+        region=current_user.region,
+        lifestyle=current_user.lifestyle_type
     )
     
     log_dict['carbon_footprint'] = analysis['carbon_footprint']
     log_dict['eco_score'] = analysis['eco_score']
     log_dict['recommendations'] = analysis['alternatives']
+    log_dict['environmental_impact'] = analysis['impact']
+    log_dict['carbon_breakdown'] = analysis['breakdown']
     
     product_log = ProductLog(**log_dict)
     doc = product_log.model_dump()
@@ -306,6 +578,19 @@ async def create_product_log(log_data: ProductLogCreate, current_user: User = De
     
     await db.product_logs.insert_one(doc)
     return product_log
+
+@api_router.delete("/products/log/{log_id}")
+async def delete_product_log(log_id: str, current_user: User = Depends(get_current_user)):
+    # Find and delete specific log for this user
+    result = await db.product_logs.delete_one({
+        'id': log_id,
+        'user_id': current_user.id
+    })
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Log not found or unauthorized")
+        
+    return {"message": "Log deleted successfully"}
 
 @api_router.get("/products/logs", response_model=List[ProductLog])
 async def get_product_logs(current_user: User = Depends(get_current_user)):
@@ -325,7 +610,9 @@ async def analyze_carbon(request: CarbonAnalysisRequest, current_user: User = De
     analysis = await analyze_carbon_footprint(
         request.product_name,
         request.category,
-        request.product_details or ""
+        request.product_details or "",
+        region=current_user.region,
+        lifestyle=current_user.lifestyle_type
     )
     return analysis
 
@@ -335,20 +622,14 @@ async def analyze_photo(file: UploadFile = File(...), current_user: User = Depen
     contents = await file.read()
     image_base64 = base64.b64encode(contents).decode('utf-8')
     
-    # Analyze image
-    result = await analyze_image(image_base64)
-    
-    # Get carbon analysis
-    carbon_analysis = await analyze_carbon_footprint(
-        result['product_name'],
-        result['category'],
-        result['details']
+    # Perform Unified Analysis (Identification + Carbon + Impact in ONE call)
+    analysis = await analyze_image_unified(
+        image_base64,
+        region=current_user.region,
+        lifestyle=current_user.lifestyle_type
     )
     
-    return {
-        **result,
-        **carbon_analysis
-    }
+    return analysis
 
 @api_router.get("/dashboard/stats")
 async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
@@ -390,22 +671,65 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
         'carbon_trend': carbon_trend
     }
 
+# Temporary storage for mobile upload sessions (in-memory)
+upload_sessions = {}
+
+class MobileUploadInit(BaseModel):
+    pass
+
+@api_router.post("/mobile/init")
+async def init_mobile_session():
+    session_id = str(uuid.uuid4())
+    upload_sessions[session_id] = {"status": "waiting", "image_data": None, "barcode_data": None}
+    return {"session_id": session_id}
+
+@api_router.post("/mobile/barcode/{session_id}")
+async def submit_mobile_barcode(session_id: str, request: dict):
+    if session_id not in upload_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    upload_sessions[session_id] = {
+        "status": "completed", 
+        "barcode_data": request.get('barcode'),
+        "image_data": None
+    }
+    return {"message": "Barcode submitted successfully"}
+
+@api_router.post("/mobile/upload/{session_id}")
+async def upload_mobile_photo(session_id: str, file: UploadFile = File(...)):
+    if session_id not in upload_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    contents = await file.read()
+    image_base64 = base64.b64encode(contents).decode('utf-8')
+    
+    upload_sessions[session_id] = {
+        "status": "completed", 
+        "image_data": image_base64,
+        "barcode_data": None
+    }
+    return {"message": "Upload successful"}
+
+@api_router.get("/mobile/status/{session_id}")
+async def get_mobile_session_status(session_id: str):
+    if session_id not in upload_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    return upload_sessions[session_id]
+
 # Include router
 app.include_router(api_router)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+@app.get("/")
+def read_root():
+    return {"status": "ok", "message": "Backend is running"}
 
 @app.on_event("shutdown")
 async def shutdown_db_client():

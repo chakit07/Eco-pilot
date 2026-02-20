@@ -47,7 +47,7 @@ const Dashboard = () => {
     <div className="min-h-screen" data-testid="dashboard">
       {/* Header */}
       <div className="bg-white shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-10 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <Leaf className="w-8 h-8 text-green-600" />
@@ -71,7 +71,7 @@ const Dashboard = () => {
       </div>
 
       {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-10 py-12">
         {/* Welcome Section */}
         <div className="mb-12">
           <h2 className="text-4xl font-bold text-green-800 mb-3">Welcome back, {user?.name}!</h2>
