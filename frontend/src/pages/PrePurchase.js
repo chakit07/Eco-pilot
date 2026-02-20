@@ -245,7 +245,7 @@ const PrePurchase = () => {
                 <h3 className="text-lg font-semibold text-green-800 mb-4 tracking-tight">Scan with your smartphone</h3>
                 <div className="bg-white p-6 inline-block rounded-3xl shadow-xl border border-blue-100 mb-4">
                   <QRCodeSVG
-                    value={`${window.location.protocol}//${window.location.hostname}:3000/mobile-scanner/${mobileSessionId}`}
+                    value={`${window.location.origin}/mobile-scanner/${mobileSessionId}`}
                     size={200}
                     level="H"
                     includeMargin={false}
