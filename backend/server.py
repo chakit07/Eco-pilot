@@ -332,38 +332,29 @@ async def analyze_carbon_footprint(product_name: str, category: str, details: st
 
     return result
 
-async def analyze_image_unified(image_base64: str, region: str = "Global", lifestyle: str = "General") -> dict:
-    """Unified Vision & Carbon Analysis in a single API call to save quota and time"""
-    prompt = f"""You are EcoCalc AI Vision — an Environmental Impact Scientist and Wisdom Consultant.
+async def analyze_image(image_base64: str) -> dict:
+    """Use AI vision to analyze ANY image with hyper-efficiency"""
+    prompt = """You are EcoCalc AI Vision — an advanced Omni-Scanner for environmental impacts.
     
-    CRITICAL CAPABILITY: You can analyze ANY image. Whether it's a specific product, a wide landscape, a person, or a complex indoor scene, you must extract environmental meaning and carbon data.
-    
-    MISSION: Identify the subject and provide DEEP ENVIRONMENTAL INSIGHTS, carbon data, and GENUINE WISDOM.
+    CRITICAL CAPABILITY: You can analyze ANY image. Whether it's a specific product, a wide landscape, a person, or a complex indoor scene, you must extract environmental meaning.
     
     INSTRUCTIONS:
-    - BEYOND PRODUCTS: If the image is a scene, land-type, or activity, analyze its environmental role (e.g., carbon sink potential, biodiversity, or urban footprint).
-    - SCIENTIFIC LENS: Use GHG Protocol for footprints, but use Ecological Science for "random things" (e.g., Albedo effects, particulate matter, soil health).
-    - MATH PRECISION: Always show a calculation (Activity x Factor) based on visual estimation of scale/usage.
-    - REGIONAL SENSITIVITY: Consider electricity grid intensity and transport logistics for {region}.
-
-    Return your response in this exact format (STRICT):
+    - If the image is a PRODUCT: Identify its materials, estimated weight, and lifecycle impact.
+    - If the image is a SCENE (Landscape/City): Identify environmental health (vibrant nature vs urban smog), carbon sequestration potential (trees/plants), or urban footprint (cars/buildings).
+    - If the image is a PERSON/ACTIVITY: Identify the context (e.g., traveling, eating, working) and its associated footprint.
+    - NEVER say "I don't know". Provide an 'Environmental Perspective' based on visual cues.
+    
+    Structure your identification:
+    1. Subject/Activity: [Specific identification]
+    2. Category: [electronics, clothing, food, home, vehicle, beauty, sports, books, or 'other']
+    3. Key details: [Identify materials, energy indicators, or environmental context]
+    4. Three eco-friendly specific alternatives or behavioral improvements
+    
+    Return your response in this exact format:
     PRODUCT: [Identified Subject]
-    CATEGORY: [electronics, clothing, food, home, vehicle, beauty, sports, books, or 'other']
-    DETAILS: [Scientific description for identification]
-    CARBON: [Numeric value in kg CO2e, or 0 if it's a carbon sink]
-    BREAKDOWN: Phase A [X]% | Phase B [Y]% | Phase C [Z]% | Phase D [W]%
-    ECO_SCORE: [0-100 rating]
-    ALTERNATIVES: [Insight/Action 1] | [Insight/Action 2] | [Insight/Action 3]
-    IMPACT:
-    1. Key Observation: [What makes this subject environmentally significant?]
-    2. Context & Scale: [The scope seen in this specific image]
-    3. Deep Insight: [A specialized scientific/ecological fact related to this image]
-    4. Why it matters: [The 'Wisdom' - explaining the long-term planetary impact]
-    5. Sustainable Shift: [A specific behavioral or systemic improvement]
-    6. Expected Saving: [The estimated impact of making that shift]
-    7. Climate Perspective: [A philosophical or broad environmental takeaway]
-
-    DETAILED_MATH: [The logic used to reach the footprint/score]
+    CATEGORY: [Category]
+    DETAILS: [Detailed description for carbon analysis]
+    ALTERNATIVES: [alt1] | [alt2] | [alt3]
     """
 
     try:
@@ -390,41 +381,55 @@ async def analyze_image_unified(image_base64: str, region: str = "Global", lifes
                 if "```" in response_text:
                     response_text = re.sub(r'```[a-zA-Z]*\n?', '', response_text).strip()
                 success = True
-                logger.info(f"Success with unified vision model: {model_name}")
+                logger.info(f"Success with vision model: {model_name}")
                 break
             except Exception as e:
                 last_err = str(e)
-                if "429" in last_err:
-                    logger.warning(f"Rate limited on {model_name}. Trying next...")
-                    continue
                 if "404" in last_err:
-                    logger.warning(f"Model {model_name} failed: {last_err}")
+                    logger.warning(f"Vision model {model_name} failed: {last_err}")
                     continue
                 else:
                     raise e
                     
         if not success:
+            # Final attempt: list models and try the first one that supports generateContent
+            try:
+                available = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+                for am in available:
+                    try:
+                        model = genai.GenerativeModel(am)
+                        response = await asyncio.to_thread(
+                            model.generate_content,
+                            [prompt, {'mime_type': 'image/jpeg', 'data': image_data}]
+                        )
+                        response_text = response.text
+                        if "```" in response_text:
+                            response_text = re.sub(r'```[a-zA-Z]*\n?', '', response_text).strip()
+                        success = True
+                        logger.info(f"Success with discovered vision model: {am}")
+                        break
+                    except:
+                        continue
+            except:
+                pass
+
+        if not success:
             raise Exception(f"All vision models failed. Last error: {last_err}")
             
     except Exception as e:
-        logger.error(f"Gemini unified analysis failed: {e}")
+        logger.error(f"Gemini image analysis failed: {e}")
         # Fallback values if API fails
-        response_text = f"PRODUCT: Unknown Image | CATEGORY: other | DETAILS: Analysis failed: {str(e)[:50]}\nCARBON: 1.0\nBREAKDOWN: Unknown 100%\nECO_SCORE: 50\nALTERNATIVES: Eco Choice 1 | Eco Choice 2\nIMPACT: 1. Error: {str(e)[:50]}"
+        response_text = f"PRODUCT: Unknown Image | CATEGORY: other | DETAILS: Analysis failed: {str(e)[:50]} | ALTERNATIVES: Eco Choice 1 | Eco Choice 2"
 
     # Parse response
-    logger.info(f"AI Unified Analysis Response: {response_text}")
-    
+    logger.info(f"AI Image Analysis Response: {response_text}")
+    print(f"DEBUG: AI Image Analysis Response: {response_text}")
+
     result = {
         'product_name': 'Unknown Product',
-        'category': 'other',
+        'category': 'electronics',
         'details': '',
-        'carbon_footprint': 0.0,
-        'eco_score': 50,
-        'alternatives': [],
-        'impact': '',
-        'impact_details': [],
-        'breakdown': {},
-        'calculation': ''
+        'alternatives': []
     }
 
     import re
@@ -434,67 +439,25 @@ async def analyze_image_unified(image_base64: str, region: str = "Global", lifes
         match = re.search(pattern, text, re.S | re.I)
         return match.group(1).strip() if match else ""
 
-    result['product_name'] = extract_section("PRODUCT", response_text) or 'Unknown Image'
-    result['details'] = extract_section("DETAILS", response_text)
+    result['product_name'] = extract_section("PRODUCT", response_text) or 'Unknown Product'
     
-    # Category parsing
     cat = extract_section("CATEGORY", response_text).lower()
     valid_cats = ['electronics', 'clothing', 'food', 'home', 'vehicle', 'beauty', 'sports', 'books', 'other']
-    result['category'] = next((c for c in valid_cats if c in cat), 'other')
+    if cat in valid_cats:
+        result['category'] = cat
+    else:
+        # Fallback mapping
+        if 'car' in cat or 'bike' in cat: result['category'] = 'vehicle'
+        elif 'wear' in cat: result['category'] = 'clothing'
+        elif 'plant' in cat or 'tree' in cat: result['category'] = 'home'
+        else: result['category'] = 'other'
 
-    # Carbon
-    carbon_str = extract_section("CARBON", response_text)
-    try:
-        result['carbon_footprint'] = float(re.search(r'[\d\.]+', carbon_str).group())
-    except:
-        result['carbon_footprint'] = 1.0
-
-    # Eco Score
-    score_str = extract_section("ECO_SCORE", response_text)
-    try:
-        result['eco_score'] = int(re.search(r'\d+', score_str).group())
-    except:
-        result['eco_score'] = 50
-
-    # Breakdown
-    breakdown_str = extract_section("BREAKDOWN", response_text)
-    if breakdown_str:
-        try:
-            parts = breakdown_str.split('|')
-            for part in parts:
-                subparts = part.strip().split()
-                if len(subparts) >= 2:
-                    label = " ".join([s for s in subparts if not s[0].isdigit()])
-                    value = re.search(r'\d+', part)
-                    if value:
-                        result['breakdown'][label] = float(value.group())
-        except:
-            pass
-
-    # Alternatives
+    result['details'] = extract_section("DETAILS", response_text)
+    
     alts_str = extract_section("ALTERNATIVES", response_text)
     if alts_str:
-        result['alternatives'] = [a.strip('- ').strip() for a in re.split(r'[|\n]', alts_str) if a.strip()]
-
-    # Impact
-    impact_text = extract_section("IMPACT", response_text)
-    result['impact'] = impact_text
-    
-    # Parse impact details
-    try:
-        points = re.split(r'(\d+\.\s+[^:]+:)', impact_text)
-        details = []
-        if len(points) > 1:
-            for i in range(1, len(points), 2):
-                title = points[i].strip()
-                content = points[i+1].strip() if i+1 < len(points) else ""
-                if title and content:
-                    details.append({"title": title, "content": content})
-        result['impact_details'] = details
-    except:
-        pass
-
-    result['calculation'] = extract_section("DETAILED_MATH", response_text)
+        alts = [a.strip('- ').strip() for a in re.split(r'[|\n]', alts_str) if a.strip()]
+        result['alternatives'] = [a for a in alts if a and len(a) > 2]
 
     return result
 
@@ -622,14 +585,32 @@ async def analyze_photo(file: UploadFile = File(...), current_user: User = Depen
     contents = await file.read()
     image_base64 = base64.b64encode(contents).decode('utf-8')
     
-    # Perform Unified Analysis (Identification + Carbon + Impact in ONE call)
-    analysis = await analyze_image_unified(
-        image_base64,
+    # Analyze image
+    result = await analyze_image(image_base64)
+    
+    # Get carbon analysis
+    carbon_analysis = await analyze_carbon_footprint(
+        result['product_name'],
+        result['category'],
+        result['details'],
         region=current_user.region,
         lifestyle=current_user.lifestyle_type
     )
     
-    return analysis
+    # Merge results
+    # Use alternatives from carbon analysis if they are better (not fallback)
+    # or if result['alternatives'] is empty
+    if not result.get('alternatives') or (carbon_analysis.get('alternatives') and "Eco Choice" not in carbon_analysis['alternatives'][0]):
+        # Keep carbon_analysis alternatives
+        pass
+    else:
+        # Use image analysis alternatives if carbon ones look like fallback
+        carbon_analysis['alternatives'] = result.get('alternatives', [])
+
+    return {
+        **result,
+        **carbon_analysis
+    }
 
 @api_router.get("/dashboard/stats")
 async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
