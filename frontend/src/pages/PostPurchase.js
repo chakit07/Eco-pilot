@@ -129,7 +129,14 @@ const PostPurchase = () => {
 
       toast.success('Photo analyzed successfully!');
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to analyze photo');
+      if (error.response?.status === 429) {
+        toast.error('API Rate Limit Exceeded. Please wait 60 seconds before trying again.', {
+          description: 'The AI service is temporarily busy.',
+          duration: 5000
+        });
+      } else {
+        toast.error(error.response?.data?.detail || 'Failed to analyze photo');
+      }
     } finally {
       setAnalyzing(false);
     }
@@ -148,7 +155,14 @@ const PostPurchase = () => {
       setAnalysis(response.data);
       toast.success('Analysis complete!');
     } catch (error) {
-      toast.error('Failed to analyze product');
+      if (error.response?.status === 429) {
+        toast.error('API Rate Limit Exceeded. Please wait 60 seconds.', {
+          description: 'Try again in a minute.',
+          duration: 5000
+        });
+      } else {
+        toast.error('Failed to analyze product');
+      }
     } finally {
       setLoading(false);
     }

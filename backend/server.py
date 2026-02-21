@@ -25,7 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.middleware.cors import CORSMiddleware
 
 ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
+load_dotenv(ROOT_DIR / '.env', override=True)
 
 # MongoDB connection
 mongo_url = os.environ['MONGO_URL']
@@ -41,6 +41,11 @@ JWT_EXPIRATION_HOURS = 72
 api_key = os.environ.get('GOOGLE_API_KEY')
 if not api_key or api_key == 'YOUR_GEMINI_API_KEY_HERE':
     logger.error("GOOGLE_API_KEY is not set correctly in .env file")
+else:
+    # Log masked key for diagnostic purposes
+    masked_key = f"{api_key[:4]}...{api_key[-4:]}" if len(api_key) > 8 else "****"
+    logger.info(f"Using Google API Key: {masked_key}")
+
 genai.configure(api_key=api_key)
 
 # Log available models to debug 404 issues
@@ -142,6 +147,9 @@ def create_token(user_id: str) -> str:
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
+# In-memory cache for analysis results to save quota
+analysis_cache = {}
+
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     try:
         token = credentials.credentials
@@ -157,7 +165,14 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         raise HTTPException(status_code=401, detail="Invalid token")
 
 async def analyze_carbon_footprint(product_name: str, category: str, details: str = "", region: str = "Global", lifestyle: str = "General") -> dict:
-    """Use AI to analyze carbon footprint using GHG Protocol standards"""
+    """Use AI to analyze carbon footprint using GHG Protocol standards with caching"""
+    
+    # Check cache first
+    cache_key = f"{product_name.lower()}_{category.lower()}_{details.lower()[:50]}"
+    if cache_key in analysis_cache:
+        logger.info(f"Using cached analysis for {product_name}")
+        return analysis_cache[cache_key]
+
 
     prompt = f"""You are EcoCalc AI — an Environmental Impact Scientist and Wisdom Consultant.
     Your mission is to provide DEEP ENVIRONMENTAL INSIGHTS, carbon data, and GENUINE WISDOM for whatever subject is presented.
@@ -199,29 +214,44 @@ async def analyze_carbon_footprint(product_name: str, category: str, details: st
         success = False
         last_err = ""
         model_names = [
-            'gemini-1.5-flash',           # Extremely reliable fallback
-            'gemini-2.0-flash',           # Primary: High efficiency, speed & reasoning
-            'gemini-1.5-pro',            # High-accuracy fallback
-            'models/gemini-1.5-flash',
-            'models/gemini-2.0-flash',
-            'gemini-2.0-flash-exp'
+            'gemini-2.0-flash',           # Primary: High efficiency
+            'gemini-flash-latest',        # Reliable alias
+            'models/gemini-2.0-flash',    # Explicit path
+            'models/gemini-flash-latest', # Explicit path
+            'gemini-pro-latest'           # High-accuracy fallback
         ]
         
         for model_name in model_names:
             try:
                 model = genai.GenerativeModel(model_name)
-                response = await asyncio.to_thread(model.generate_content, prompt)
-                response_text = response.text
                 
-                # Check for markdown blocks
-                if "```" in response_text:
-                    response_text = re.sub(r'```[a-zA-Z]*\n?', '', response_text).strip()
+                # Internal retry logic for 429s specifically
+                for attempt in range(2):
+                    try:
+                        response = await asyncio.to_thread(model.generate_content, prompt)
+                        response_text = response.text
+                        success = True
+                        break
+                    except Exception as e:
+                        if "429" in str(e) and attempt == 0:
+                            logger.warning(f"429 hit for {model_name}. Retrying in 2 seconds...")
+                            await asyncio.sleep(2)
+                            continue
+                        raise e
                 
-                success = True
-                logger.info(f"Success with model: {model_name}")
-                break
+                if success:
+                    # Check for markdown blocks
+                    if "```" in response_text:
+                        response_text = re.sub(r'```[a-zA-Z]*\n?', '', response_text).strip()
+                    logger.info(f"Success with model: {model_name}")
+                    break
             except Exception as e:
                 last_err = str(e)
+                if "429" in last_err:
+                    # If we still get a 429 after retry, wait then fail fast or try fallback
+                    logger.error(f"Quota exhausted for {model_name} after retry.")
+                    # Don't try other models if it's a 429 - usually means account-wide limit
+                    raise e
                 if "404" in last_err or "unsupported" in last_err.lower():
                     logger.warning(f"Model {model_name} failed: {last_err}")
                     continue
@@ -249,10 +279,14 @@ async def analyze_carbon_footprint(product_name: str, category: str, details: st
     except Exception as e:
         err_msg = str(e)
         logger.error(f"Gemini Analysis Error: {err_msg}")
-        if "429" in err_msg:
-            err_msg = "Quota exceeded (429). Please wait a minute or use a different API key."
         
-        # Dynamic fallback
+        if "429" in err_msg:
+            raise HTTPException(
+                status_code=429, 
+                detail="AI Quota exceeded. Google Gemini is rate-limiting requests. Please wait 60 seconds and try again."
+            )
+        
+        # Generic fallback for other errors (like 500s)
         response_text = f"CARBON: 1.5\nBREAKDOWN: Manufacturing 60% | Transport 20% | Usage 10% | Disposal 10%\nECO_SCORE: 50\nALTERNATIVES: Alternative for {product_name} | Eco Choice 2\nIMPACT: Analysis temporarily unavailable. {err_msg[:100]}"
 
     # Parse response
@@ -333,6 +367,9 @@ async def analyze_carbon_footprint(product_name: str, category: str, details: st
     # DETAILED_MATH
     result['calculation'] = extract_section("DETAILED_MATH", response_text)
 
+    # Save to cache before returning
+    analysis_cache[cache_key] = result
+    
     return result
 
 async def analyze_image_unified(image_base64: str, region: str = "Global", lifestyle: str = "General") -> dict:
@@ -366,7 +403,12 @@ async def analyze_image_unified(image_base64: str, region: str = "Global", lifes
         success = False
         last_err = ""
         image_data = base64.b64decode(image_base64)
-        model_names = ['gemini-1.5-flash', 'gemini-2.0-flash', 'models/gemini-1.5-flash']
+        model_names = [
+            'gemini-2.0-flash', 
+            'gemini-flash-latest', 
+            'models/gemini-2.0-flash', 
+            'models/gemini-flash-latest'
+        ]
         
         for model_name in model_names:
             try:
@@ -382,9 +424,12 @@ async def analyze_image_unified(image_base64: str, region: str = "Global", lifes
                 break
             except Exception as e:
                 last_err = str(e)
-                if "404" in last_err: continue
-                if "429" in last_err: break
-                raise e
+                if "404" in last_err or "unsupported" in last_err.lower(): 
+                    continue
+                # If we get a 429, we still try next model just in case, 
+                # but if all fail we'll handle it in the outer block
+                logger.warning(f"Model {model_name} failed: {last_err}")
+                continue
         
         if not success:
             raise Exception(f"Analysis failed. {last_err}")
@@ -392,8 +437,15 @@ async def analyze_image_unified(image_base64: str, region: str = "Global", lifes
     except Exception as e:
         err_msg = str(e)
         logger.error(f"Unified analysis failed: {err_msg}")
-        # Fallback
-        response_text = f"PRODUCT: Unknown | CATEGORY: other | DETAILS: {err_msg[:50]} | CARBON: 1.0 | BREAKDOWN: Unknown 100% | ECO_SCORE: 50 | ALTERNATIVES: Alt 1 | IMPACT: 1. Error: {err_msg[:50]} | DETAILED_MATH: N/A"
+        
+        if "429" in err_msg:
+            raise HTTPException(
+                status_code=429,
+                detail="Vision AI Quota Exceeded. Please wait a minute before scanning again."
+            )
+            
+        # Fallback for non-quota errors
+        response_text = f"PRODUCT: Unknown | CATEGORY: other | DETAILS: Analysis failed: {err_msg[:50]} | CARBON: 1.0 | BREAKDOWN: Unknown 100% | ECO_SCORE: 50 | ALTERNATIVES: Alt 1 | IMPACT: 1. Error: {err_msg[:50]} | DETAILED_MATH: N/A"
 
     # Parse response (using existing robust logic)
     def extract_section(name, text):
@@ -461,12 +513,10 @@ async def analyze_image(image_base64: str) -> dict:
         last_err = ""
         image_data = base64.b64decode(image_base64)
         model_names = [
-            'gemini-1.5-flash',           # Fast & reliable vision
-            'gemini-2.0-flash',           # Omni-capable vision
-            'gemini-1.5-pro',            # Complex detail fallback
-            'models/gemini-1.5-flash',
+            'gemini-2.0-flash',           # Fast & reliable vision
+            'gemini-flash-latest',        # Modern alias
             'models/gemini-2.0-flash',
-            'gemini-2.0-flash-exp'
+            'models/gemini-flash-latest'
         ]
         
         for model_name in model_names:
