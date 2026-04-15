@@ -61,14 +61,14 @@ const Auth = () => {
   ];
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4 py-12">
+    <div className="min-h-screen flex items-center justify-center px-4 py-8 sm:py-12">
       <div className="w-full max-w-md">
-        <div className="text-center mb-8">
-          <div className="flex justify-center mb-4">
-            <Leaf className="w-12 h-12 text-green-600" />
+        <div className="text-center mb-6 sm:mb-8">
+          <div className="flex justify-center mb-3 sm:mb-4">
+            <Leaf className="w-10 h-10 sm:w-12 h-12 text-green-600" />
           </div>
-          <h1 className="text-3xl font-bold text-green-800 mb-2">EcoPilot</h1>
-          <p className="text-green-600">
+          <h1 className="text-2xl sm:text-3xl font-bold text-green-800 mb-1 sm:mb-2 tracking-tight">EcoPilot</h1>
+          <p className="text-sm sm:text-base text-green-600 font-medium">
             {isLogin ? 'Welcome back!' : 'Start your sustainability journey'}
           </p>
         </div>
@@ -168,6 +168,7 @@ const Auth = () => {
                     value={formData.lifestyle_type}
                     onChange={handleChange}
                     required={!isLogin}
+                    className="text-sm sm:text-base py-3 px-4"
                   >
                     <option value="">Select lifestyle</option>
                     <option value="urban">Urban</option>
@@ -202,7 +203,7 @@ const Auth = () => {
               data-testid="submit-btn"
               type="submit"
               disabled={loading}
-              className="btn-primary w-full"
+              className="btn-primary w-full py-3 sm:py-4 text-sm sm:text-base shadow-lg shadow-green-200"
             >
               {loading ? (
                 <span className="loading"></span>

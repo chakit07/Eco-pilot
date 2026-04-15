@@ -1,12 +1,13 @@
-import { ArrowLeft, Leaf, Lightbulb, Search, Smartphone, Camera, Upload, Loader2, TrendingUp, ChevronDown, ChevronUp, Info, Factory, Truck, Zap, Recycle, TreeDeciduous, Droplets, Flame } from 'lucide-react';
+import { ArrowLeft, Leaf, Lightbulb, Search, Smartphone, Camera, Upload, Loader2, TrendingUp, ChevronDown, ChevronUp, Info, Factory, Truck, Zap, Recycle, TreeDeciduous, Droplets, Flame, CheckCircle, Database, Smartphone as Phone } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
 import { QRCodeSVG } from 'qrcode.react';
 import { api } from '../App';
 
 const PostPurchase = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [loading, setLoading] = useState(false);
   const [analysis, setAnalysis] = useState(null);
   const [formData, setFormData] = useState({
@@ -29,6 +30,23 @@ const PostPurchase = () => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
   };
+
+  // Check for sessionId in URL (after mobile redirect)
+  useEffect(() => {
+    const query = new URLSearchParams(location.search);
+    const sessionId = query.get('sessionId');
+    if (sessionId && !mobileSessionId) {
+      setMobileSessionId(sessionId);
+      setMethod('mobile');
+      setMobileStatus('waiting');
+      // Trigger check immediately
+      api.get(`/mobile/status/${sessionId}`).then(response => {
+        if (response.data.status === 'completed') {
+          checkMobileStatus(sessionId);
+        }
+      });
+    }
+  }, [location, mobileSessionId]);
 
   // Mobile session logic - unified
   useEffect(() => {
@@ -57,9 +75,12 @@ const PostPurchase = () => {
     }
   };
 
-  const checkMobileStatus = async () => {
+  const checkMobileStatus = async (id = null) => {
+    const targetId = id || mobileSessionId;
+    if (!targetId) return;
+
     try {
-      const response = await api.get(`/mobile/status/${mobileSessionId}`);
+      const response = await api.get(`/mobile/status/${targetId}`);
       if (response.data.status === 'completed') {
         if (response.data.barcode_data) {
           setFormData(prev => ({ ...prev, barcode: response.data.barcode_data }));
@@ -176,7 +197,8 @@ const PostPurchase = () => {
         category: formData.category,
         product_name: formData.product_name,
         product_details: formData.product_details,
-        barcode: formData.barcode
+        barcode: formData.barcode,
+        ...analysis
       });
       toast.success('Product logged successfully!');
       navigate('/dashboard');
@@ -190,12 +212,12 @@ const PostPurchase = () => {
   return (
     <div className="min-h-screen" data-testid="post-purchase-page">
       {/* Header */}
-      <div className="bg-white shadow-sm">
+      <div className="bg-white shadow-sm sticky top-0 z-50">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-10 py-4">
           <button
             data-testid="back-btn"
             onClick={() => navigate('/dashboard')}
-            className="flex items-center gap-2 text-green-600 hover:text-green-700 font-medium"
+            className="flex items-center gap-2 text-green-600 hover:text-green-700 font-medium text-sm sm:text-base transition-colors"
           >
             <ArrowLeft className="w-5 h-5" /> Back to Dashboard
           </button>
@@ -203,12 +225,12 @@ const PostPurchase = () => {
       </div>
 
       <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-10 py-12">
-        <div className="text-center mb-8">
-          <div className="flex justify-center mb-4">
-            <Camera className="w-12 h-12 text-blue-600" />
+        <div className="text-center mb-6 sm:mb-8">
+          <div className="flex justify-center mb-3 sm:mb-4">
+            <Camera className="w-10 h-10 sm:w-12 h-12 text-blue-600" />
           </div>
-          <h1 className="text-4xl font-bold text-blue-800 mb-3">Post-Purchase Log</h1>
-          <p className="text-lg text-blue-600">
+          <h1 className="text-3xl sm:text-4xl font-bold text-blue-800 mb-2 sm:mb-3 leading-tight">Post-Purchase Log</h1>
+          <p className="text-base sm:text-lg text-blue-600 px-4">
             Log items you've already purchased and track your carbon footprint.
           </p>
         </div>
@@ -216,27 +238,26 @@ const PostPurchase = () => {
         {/* Method Selection */}
         <div className="card mb-6">
           <h3 className="text-lg font-semibold text-green-800 mb-4">Choose Logging Method</h3>
-          <div className="grid md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <button
               onClick={() => setMethod('manual')}
-              className={`p-4 rounded-lg border-2 transition-all ${method === 'manual'
+              className={`p-4 rounded-xl border-2 transition-all active:scale-95 ${method === 'manual'
                 ? 'border-green-600 bg-green-50'
                 : 'border-green-200 hover:border-green-400'
                 }`}
             >
-              <p className="font-semibold text-green-800">Manual Entry</p>
-              <p className="text-sm text-green-600 mt-1">Type details</p>
+              <p className="font-bold text-green-800">Manual Entry</p>
+              <p className="text-xs text-green-600 mt-1 uppercase tracking-tight font-black">Type details</p>
             </button>
-
             <button
               onClick={() => setMethod('photo')}
-              className={`p-4 rounded-lg border-2 transition-all ${method === 'photo'
+              className={`p-4 rounded-xl border-2 transition-all active:scale-95 ${method === 'photo'
                 ? 'border-blue-600 bg-blue-50'
                 : 'border-green-200 hover:border-green-400'
                 }`}
             >
-              <p className="font-semibold text-green-800">Photo Upload</p>
-              <p className="text-sm text-green-600 mt-1">Use local file</p>
+              <p className="font-bold text-green-800">Photo Upload</p>
+              <p className="text-xs text-green-600 mt-1 uppercase tracking-tight font-black">Use local file</p>
             </button>
 
             <button
@@ -244,14 +265,14 @@ const PostPurchase = () => {
                 setMethod('mobile');
                 if (!isMobile) initializeMobileSession();
               }}
-              className={`p-4 rounded-lg border-2 transition-all text-center ${method === 'mobile'
+              className={`p-4 rounded-xl border-2 transition-all text-center active:scale-95 ${method === 'mobile'
                 ? 'border-blue-600 bg-blue-50'
                 : 'border-green-200 hover:border-green-400'
                 }`}
             >
-              <Smartphone className="w-6 h-6 mx-auto mb-2 text-green-600" />
-              <p className="font-semibold text-green-800">Use Phone Camera</p>
-              <p className="text-sm text-green-600 mt-1">{isMobile ? 'Live Scanner' : 'Scan via Mobile'}</p>
+              <Smartphone className="w-5 h-5 mx-auto mb-1 text-green-600" />
+              <p className="font-bold text-green-800">Use Phone Camera</p>
+              <p className="text-xs text-green-600 mt-1 uppercase tracking-tight font-black">{isMobile ? 'Live Scanner' : 'Scan via Mobile'}</p>
             </button>
           </div>
         </div>
@@ -262,6 +283,20 @@ const PostPurchase = () => {
             {!isMobile ? (
               <div className="card mb-6 text-center animate-in zoom-in duration-300">
                 <h3 className="text-lg font-semibold text-green-800 mb-4 tracking-tight">Scan with your smartphone</h3>
+
+                {window.location.hostname === 'localhost' && (
+                  <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl mb-6 text-left animate-in slide-in-from-top duration-300">
+                    <p className="text-amber-800 text-xs font-bold uppercase mb-1">⚠️ Setup Required for Mobile</p>
+                    <p className="text-amber-700 text-[11px] leading-relaxed">
+                      You are accessing the app via <strong>localhost</strong>. Your phone cannot see "localhost".
+                      To use the mobile scanner, please open the app on this computer using:
+                      <code className="block mt-2 p-2 bg-amber-100 rounded text-amber-900 font-mono text-center select-all">
+                        http://10.224.137.250:3000
+                      </code>
+                    </p>
+                  </div>
+                )}
+
                 <div className="bg-white p-6 inline-block rounded-3xl shadow-xl border border-blue-100 mb-4">
                   <QRCodeSVG
                     value={`${window.location.origin}/mobile-scanner/${mobileSessionId}`}
@@ -285,7 +320,7 @@ const PostPurchase = () => {
                 </p>
                 <div className="grid grid-cols-2 gap-4 w-full">
                   <button
-                    onClick={() => navigate(`/mobile-scanner/${mobileSessionId || 'temp'}`)}
+                    onClick={() => navigate(`/mobile-scanner/${mobileSessionId || 'temp'}?type=post`)}
                     className="btn-primary py-4 flex flex-col items-center gap-1"
                   >
                     <div className="flex justify-center">
@@ -296,7 +331,7 @@ const PostPurchase = () => {
                     <span>Scan Barcode</span>
                   </button>
                   <button
-                    onClick={() => navigate(`/mobile-upload/${mobileSessionId || 'temp'}`)}
+                    onClick={() => navigate(`/mobile-upload/${mobileSessionId || 'temp'}?type=post`)}
                     className="bg-slate-900 hover:bg-slate-800 text-white rounded-2xl py-4 flex flex-col items-center gap-1 transition-all active:scale-95"
                   >
                     <Camera className="w-5 h-5" />
@@ -458,52 +493,52 @@ const PostPurchase = () => {
             <div className="card bg-gradient-to-br from-green-50 to-emerald-50">
               <h3 className="text-2xl font-bold text-green-800 mb-4">Analysis Results</h3>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 mb-8">
                 {/* KPI Card: Carbon Footprint */}
-                <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 relative overflow-hidden group hover:shadow-md transition-all">
-                  <div className="absolute top-0 right-0 w-24 h-24 -mr-8 -mt-8 bg-emerald-50 rounded-full group-hover:bg-emerald-100 transition-colors"></div>
+                <div className="bg-white rounded-2xl p-5 sm:p-6 shadow-sm border border-slate-100 relative overflow-hidden group hover:shadow-md transition-all">
+                  <div className="absolute top-0 right-0 w-20 h-20 sm:w-24 h-24 -mr-8 -mt-8 bg-emerald-50 rounded-full group-hover:bg-emerald-100 transition-colors"></div>
                   <div className="relative">
                     <div className="flex items-center gap-2 mb-4">
-                      <div className="p-2 bg-emerald-500 rounded-lg shadow-sm">
-                        <Leaf className="w-5 h-5 text-white" />
+                      <div className="p-1.5 sm:p-2 bg-emerald-500 rounded-lg shadow-sm shrink-0">
+                        <Leaf className="w-4 h-4 sm:w-5 h-5 text-white" />
                       </div>
-                      <span className="text-xs font-black text-slate-400 uppercase tracking-widest">Carbon Impact</span>
+                      <span className="text-[10px] sm:text-xs font-black text-slate-400 uppercase tracking-widest">Carbon Impact</span>
                     </div>
                     <div className="flex items-baseline gap-1">
-                      <span className="text-4xl font-black text-slate-800 tracking-tighter" data-testid="carbon-result">
+                      <span className="text-3xl sm:text-4xl font-black text-slate-800 tracking-tighter" data-testid="carbon-result">
                         {analysis.carbon_footprint}
                       </span>
-                      <span className="text-sm font-bold text-slate-400">kg CO2e</span>
+                      <span className="text-xs sm:text-sm font-bold text-slate-400">kg CO2e</span>
                     </div>
-                    <p className="text-[10px] text-slate-400 mt-2 font-medium">Estimated lifecycle emissions</p>
+                    <p className="text-[9px] sm:text-[10px] text-slate-400 mt-2 font-medium">Estimated lifecycle emissions</p>
                   </div>
                 </div>
 
                 {/* KPI Card: Eco Score */}
-                <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 relative overflow-hidden group hover:shadow-md transition-all">
-                  <div className={`absolute top-0 right-0 w-24 h-24 -mr-8 -mt-8 ${analysis.eco_score > 70 ? 'bg-green-50' : 'bg-amber-50'} rounded-full transition-colors`}></div>
+                <div className="bg-white rounded-2xl p-5 sm:p-6 shadow-sm border border-slate-100 relative overflow-hidden group hover:shadow-md transition-all">
+                  <div className={`absolute top-0 right-0 w-20 h-20 sm:w-24 h-24 -mr-8 -mt-8 ${analysis.eco_score > 70 ? 'bg-green-50' : 'bg-amber-50'} rounded-full transition-colors`}></div>
                   <div className="relative">
                     <div className="flex items-center gap-2 mb-4">
-                      <div className={`p-2 ${analysis.eco_score > 70 ? 'bg-green-500' : 'bg-amber-500'} rounded-lg shadow-sm`}>
-                        <TrendingUp className="w-5 h-5 text-white" />
+                      <div className={`p-1.5 sm:p-2 ${analysis.eco_score > 70 ? 'bg-green-500' : 'bg-amber-500'} rounded-lg shadow-sm shrink-0`}>
+                        <TrendingUp className="w-4 h-4 sm:w-5 h-5 text-white" />
                       </div>
-                      <span className="text-xs font-black text-slate-400 uppercase tracking-widest">Sustainability</span>
+                      <span className="text-[10px] sm:text-xs font-black text-slate-400 uppercase tracking-widest">Sustainability</span>
                     </div>
                     <div className="flex items-baseline gap-1">
-                      <span className={`text-4xl font-black tracking-tighter ${analysis.eco_score > 70 ? 'text-green-600' : 'text-amber-600'}`} data-testid="eco-score-result">
+                      <span className={`text-3xl sm:text-4xl font-black tracking-tighter ${analysis.eco_score > 70 ? 'text-green-600' : 'text-amber-600'}`} data-testid="eco-score-result">
                         {analysis.eco_score}
                       </span>
-                      <span className="text-sm font-bold text-slate-400">/ 100</span>
+                      <span className="text-xs sm:text-sm font-bold text-slate-400">/ 100</span>
                     </div>
-                    <p className="text-[10px] text-slate-400 mt-2 font-medium">Overall ecological rating</p>
+                    <p className="text-[9px] sm:text-[10px] text-slate-400 mt-2 font-medium">Overall ecological rating</p>
                   </div>
                 </div>
 
                 {/* KPI Card: Quick Label */}
-                <div className="bg-slate-50 rounded-2xl p-6 border-2 border-dashed border-slate-200 flex flex-col justify-center items-center text-center">
-                  <p className="text-[11px] font-bold text-slate-400 uppercase mb-2">Analysis Status</p>
-                  <div className={`px-4 py-1.5 rounded-full text-xs font-black uppercase ${analysis.eco_score > 70 ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
-                    {analysis.eco_score > 70 ? 'Environment Friendly' : 'Attention Required'}
+                <div className="bg-slate-50 rounded-2xl p-5 sm:p-6 border-2 border-dashed border-slate-200 flex flex-col justify-center items-center text-center sm:col-span-2 lg:col-span-1">
+                  <p className="text-[9px] sm:text-[11px] font-bold text-slate-400 uppercase mb-2 leading-none">Analysis Status</p>
+                  <div className={`px-4 py-1.5 rounded-full text-[10px] sm:text-xs font-black uppercase ${analysis.eco_score > 70 ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                    {analysis.eco_score > 70 ? 'Eco Friendly' : 'Attention Required'}
                   </div>
                 </div>
               </div>
@@ -516,89 +551,70 @@ const PostPurchase = () => {
                       Discovery & Findings
                     </h3>
 
-                    {analysis.impact_details && analysis.impact_details.length > 0 ? (
-                      <div className="flex flex-col gap-4">
-                        {analysis.impact_details.map((detail, idx) => (
-                          <div key={idx} className="bg-white rounded-xl p-5 shadow-sm border border-green-100 hover:shadow-md transition-all group relative overflow-hidden">
+                    {analysis.detected_item ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+                        {[
+                          { label: "Detected Item", value: analysis.detected_item, icon: <Search size={14} /> },
+                          { label: "Assumptions", value: analysis.assumptions, icon: <Info size={14} /> },
+                          { label: "Data Source", value: analysis.data_source, icon: <Database size={14} /> },
+                          { label: "Why it emits", value: analysis.why_it_emits, icon: <Zap size={14} /> },
+                          { label: "Better Choice", value: analysis.better_choice, icon: <CheckCircle size={14} className="text-green-500" /> },
+                          { label: "Expected Saving", value: analysis.expected_saving, icon: <TrendingUp size={14} /> },
+                          { label: "Carbon Saved", value: analysis.carbon_saved, icon: <Leaf size={14} /> }
+                        ].filter(f => f.value).map((field, i) => (
+                          <div key={i} className="bg-white rounded-xl p-4 sm:p-5 shadow-sm border border-green-100 hover:shadow-md transition-all group relative overflow-hidden">
                             <div className="absolute top-0 left-0 w-1.5 h-full bg-green-500"></div>
                             <div className="flex items-center gap-3 mb-2">
-                              <span className="flex-shrink-0 w-6 h-6 rounded bg-green-50 flex items-center justify-center text-[10px] font-extrabold text-green-600 border border-green-100 uppercase">
-                                {idx + 1}
-                              </span>
-                              <h4 className="text-sm font-black text-green-900 uppercase tracking-widest group-hover:text-green-700 transition-colors">
-                                {detail.title.replace(/^\d+\.\s*/, '').replace(/:$/, '')}
+                              <div className="p-1.5 bg-green-50 rounded-lg text-green-600 shrink-0">
+                                {field.icon}
+                              </div>
+                              <h4 className="text-xs sm:text-sm font-black text-green-900 uppercase tracking-widest group-hover:text-green-700 transition-colors">
+                                {field.label}
                               </h4>
                             </div>
-                            <div className="pl-9 space-y-2">
-                              {detail.content.split('\n').filter(line => line.trim()).map((contentLine, j) => {
-                                if (contentLine.trim().startsWith('*')) {
-                                  return (
-                                    <div key={j} className="flex gap-2 items-start bg-slate-50/50 p-2 rounded-lg border border-slate-100/50">
-                                      <span className="text-green-500 font-black mt-0.5">•</span>
-                                      <span className="text-xs text-slate-600 font-medium italic">{contentLine.trim().substring(1).trim()}</span>
-                                    </div>
-                                  );
-                                }
-                                return (
-                                  <p key={j} className="text-sm text-slate-700 leading-relaxed font-medium">
-                                    {contentLine}
-                                  </p>
-                                );
-                              })}
+                            <div className="pl-9">
+                              <p className="text-xs sm:text-sm text-slate-700 leading-relaxed font-medium">
+                                {field.value}
+                              </p>
                             </div>
                           </div>
                         ))}
                       </div>
                     ) : (
-                      (() => {
-                        const text = analysis.impact;
-                        if (!text) return null;
-
-                        // Intelligent splitting - handles both newlines and dense blocks
-                        const segments = text.split(/(\d+\.\s+[^:]+:)/).filter(Boolean);
-                        const points = [];
-
-                        if (segments.length > 1) {
-                          for (let i = 0; i < segments.length; i++) {
-                            if (segments[i].match(/^\d+\.\s+[^:]+:$/)) {
-                              points.push({ title: segments[i], content: segments[i + 1] || "" });
-                              i++;
-                            } else if (segments[i].trim()) {
-                              points.push({ title: "Observation", content: segments[i] });
-                            }
-                          }
-                        } else {
-                          // Fallback to newline split
-                          text.split('\n').filter(l => l.trim()).forEach(l => {
-                            const m = l.match(/^(\d+\.\s+[^:]+:)(.*)/);
-                            if (m) points.push({ title: m[1], content: m[2] });
-                            else points.push({ title: "Context", content: l });
-                          });
-                        }
-
-                        return (
-                          <div className="flex flex-col gap-4">
-                            {points.map((point, idx) => (
-                              <div key={idx} className="bg-white rounded-xl p-5 shadow-sm border border-green-100 hover:shadow-md transition-all group relative overflow-hidden">
-                                <div className="absolute top-0 left-0 w-1.5 h-full bg-green-500"></div>
-                                <div className="flex items-center gap-3 mb-2">
-                                  <span className="flex-shrink-0 w-6 h-6 rounded bg-green-50 flex items-center justify-center text-[10px] font-extrabold text-green-600 border border-green-100 uppercase">
-                                    {idx + 1}
-                                  </span>
-                                  <h4 className="text-sm font-black text-green-900 uppercase tracking-widest group-hover:text-green-700 transition-colors">
-                                    {point.title.replace(/^\d+\.\s*/, '').replace(/:$/, '')}
-                                  </h4>
-                                </div>
-                                <div className="pl-9">
-                                  <p className="text-sm text-slate-700 leading-relaxed font-medium">
-                                    {point.content.trim()}
-                                  </p>
-                                </div>
+                      analysis.impact_details && analysis.impact_details.length > 0 ? (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+                          {analysis.impact_details.map((detail, idx) => (
+                            <div key={idx} className="bg-white rounded-xl p-4 sm:p-5 shadow-sm border border-green-100 hover:shadow-md transition-all group relative overflow-hidden">
+                              <div className="absolute top-0 left-0 w-1.5 h-full bg-green-500"></div>
+                              <div className="flex items-center gap-3 mb-2">
+                                <span className="flex-shrink-0 w-6 h-6 rounded bg-green-50 flex items-center justify-center text-[10px] font-extrabold text-green-600 border border-green-100 uppercase">
+                                  {idx + 1}
+                                </span>
+                                <h4 className="text-xs sm:text-sm font-black text-green-900 uppercase tracking-widest group-hover:text-green-700 transition-colors">
+                                  {detail.title.replace(/^\d+\.\s*/, '').replace(/:$/, '')}
+                                </h4>
                               </div>
-                            ))}
-                          </div>
-                        );
-                      })()
+                              <div className="pl-9 space-y-2">
+                                {detail.content.split('\n').filter(line => line.trim()).map((contentLine, j) => {
+                                  if (contentLine.trim().startsWith('*')) {
+                                    return (
+                                      <div key={j} className="flex gap-2 items-start bg-slate-50/50 p-2 rounded-lg border border-slate-100/50">
+                                        <span className="text-green-500 font-black mt-0.5">•</span>
+                                        <span className="text-[10px] sm:text-xs text-slate-600 font-medium italic">{contentLine.trim().substring(1).trim()}</span>
+                                      </div>
+                                    );
+                                  }
+                                  return (
+                                    <p key={j} className="text-xs sm:text-sm text-slate-700 leading-relaxed font-medium">
+                                      {contentLine}
+                                    </p>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null
                     )}
                   </div>
 
@@ -688,46 +704,46 @@ const PostPurchase = () => {
                       </p>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 relative">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 relative">
                       {/* Equivalence Card 1: Trees */}
-                      <div className="bg-slate-800/50 rounded-2xl p-6 border border-slate-700/50 hover:border-emerald-500/50 transition-all group/card">
-                        <div className="w-12 h-12 bg-emerald-500/20 rounded-xl flex items-center justify-center mb-4 group-hover/card:scale-110 transition-transform">
-                          <TreeDeciduous className="w-6 h-6 text-emerald-400" />
+                      <div className="bg-slate-800/50 rounded-2xl p-5 sm:p-6 border border-slate-700/50 hover:border-emerald-500/50 transition-all group/card">
+                        <div className="w-10 h-10 sm:w-12 h-12 bg-emerald-500/20 rounded-xl flex items-center justify-center mb-4 group-hover/card:scale-110 transition-transform">
+                          <TreeDeciduous className="w-5 h-5 sm:w-6 h-6 text-emerald-400" />
                         </div>
                         <div className="space-y-1">
-                          <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">Offset Requirement</p>
-                          <h4 className="text-3xl font-black text-white tracking-tighter">
+                          <p className="text-[9px] sm:text-[10px] font-black text-emerald-400 uppercase tracking-widest">Offset Requirement</p>
+                          <h4 className="text-2xl sm:text-3xl font-black text-white tracking-tighter">
                             {(analysis.carbon_footprint / 21).toFixed(1)}
                           </h4>
-                          <p className="text-xs text-slate-400 font-medium">Full-grown trees needed to absorb this in a year</p>
+                          <p className="text-[10px] sm:text-xs text-slate-400 font-medium">Full-grown trees needed to absorb this in a year</p>
                         </div>
                       </div>
 
                       {/* Equivalence Card 2: Energy */}
-                      <div className="bg-slate-800/50 rounded-2xl p-6 border border-slate-700/50 hover:border-blue-500/50 transition-all group/card">
-                        <div className="w-12 h-12 bg-blue-500/20 rounded-xl flex items-center justify-center mb-4 group-hover/card:scale-110 transition-transform">
-                          <Zap className="w-6 h-6 text-blue-400" />
+                      <div className="bg-slate-800/50 rounded-2xl p-5 sm:p-6 border border-slate-700/50 hover:border-blue-500/50 transition-all group/card">
+                        <div className="w-10 h-10 sm:w-12 h-12 bg-blue-500/20 rounded-xl flex items-center justify-center mb-4 group-hover/card:scale-110 transition-transform">
+                          <Zap className="w-5 h-5 sm:w-6 h-6 text-blue-400" />
                         </div>
                         <div className="space-y-1">
-                          <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest">Energy Equivalent</p>
-                          <h4 className="text-3xl font-black text-white tracking-tighter">
+                          <p className="text-[9px] sm:text-[10px] font-black text-blue-400 uppercase tracking-widest">Energy Equivalent</p>
+                          <h4 className="text-2xl sm:text-3xl font-black text-white tracking-tighter">
                             {Math.round(analysis.carbon_footprint / 0.005).toLocaleString()}
                           </h4>
-                          <p className="text-xs text-slate-400 font-medium">Smartphone charges (0% to 100%)</p>
+                          <p className="text-[10px] sm:text-xs text-slate-400 font-medium">Smartphone charges (0% to 100%)</p>
                         </div>
                       </div>
 
                       {/* Equivalence Card 3: Waste */}
-                      <div className="bg-slate-800/50 rounded-2xl p-6 border border-slate-700/50 hover:border-teal-500/50 transition-all group/card">
-                        <div className="w-12 h-12 bg-teal-500/20 rounded-xl flex items-center justify-center mb-4 group-hover/card:scale-110 transition-transform">
-                          <Droplets className="w-6 h-6 text-teal-400" />
+                      <div className="bg-slate-800/50 rounded-2xl p-5 sm:p-6 border border-slate-700/50 hover:border-teal-500/50 transition-all group/card sm:col-span-2 lg:col-span-1">
+                        <div className="w-10 h-10 sm:w-12 h-12 bg-teal-500/20 rounded-xl flex items-center justify-center mb-4 group-hover/card:scale-110 transition-transform">
+                          <Droplets className="w-5 h-5 sm:w-6 h-6 text-teal-400" />
                         </div>
                         <div className="space-y-1">
-                          <p className="text-[10px] font-black text-teal-400 uppercase tracking-widest">Resource Drain</p>
-                          <h4 className="text-3xl font-black text-white tracking-tighter">
+                          <p className="text-[9px] sm:text-[10px] font-black text-teal-400 uppercase tracking-widest">Resource Drain</p>
+                          <h4 className="text-2xl sm:text-3xl font-black text-white tracking-tighter">
                             {Math.round(analysis.carbon_footprint / 0.08).toLocaleString()}
                           </h4>
-                          <p className="text-xs text-slate-400 font-medium">Equivalent in plastic PET bottle production</p>
+                          <p className="text-[10px] sm:text-xs text-slate-400 font-medium">Equivalent in plastic PET bottle production</p>
                         </div>
                       </div>
                     </div>

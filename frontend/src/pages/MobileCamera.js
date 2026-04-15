@@ -1,25 +1,29 @@
 import { useRef, useState } from 'react';
 import { Camera, RefreshCw } from 'lucide-react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import { toast } from 'sonner';
 
 const getBackendUrl = () => {
     const envUrl = process.env.REACT_APP_BACKEND_URL;
-    if (envUrl) return envUrl;
-    // If we are on a network address (not localhost), use that hostname for the API
     if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
         return `http://${window.location.hostname}:8000`;
     }
+    if (envUrl && !envUrl.includes('localhost')) return envUrl;
     return 'http://localhost:8000';
 };
 const BACKEND_URL = getBackendUrl();
 
 const MobileCamera = () => {
     const { sessionId } = useParams();
+    const navigate = useNavigate();
+    const location = useLocation();
     const fileInputRef = useRef(null);
     const [loading, setLoading] = useState(false);
     const [success, setSuccess] = useState(false);
+
+    const query = new URLSearchParams(location.search);
+    const type = query.get('type');
 
     const handleFileSelect = async (e) => {
         const file = e.target.files[0];
@@ -35,8 +39,17 @@ const MobileCamera = () => {
                     'Content-Type': 'multipart/form-data',
                 },
             });
-            setSuccess(true);
+            
             toast.success('Photo uploaded successfully!');
+            
+            if (type) {
+                // Redirect back to analysis page
+                setTimeout(() => {
+                    navigate(`/${type}-purchase?sessionId=${sessionId}`);
+                }, 1000);
+            } else {
+                setSuccess(true);
+            }
         } catch (error) {
             toast.error('Failed to upload photo. Please try again.');
         } finally {

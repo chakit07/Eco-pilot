@@ -1,12 +1,13 @@
-import { ArrowLeft, Leaf, Lightbulb, Search, Smartphone, Camera, Upload, Loader2, TrendingUp, ChevronDown, ChevronUp, Info } from 'lucide-react';
+import { ArrowLeft, Leaf, Lightbulb, Search, Smartphone, Camera, Upload, Loader2, TrendingUp, ChevronDown, ChevronUp, Info, Database, CheckCircle, Zap } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
 import { QRCodeSVG } from 'qrcode.react';
 import { api } from '../App';
 
 const PrePurchase = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [loading, setLoading] = useState(false);
   const [analysis, setAnalysis] = useState(null);
   const [formData, setFormData] = useState({
@@ -29,6 +30,23 @@ const PrePurchase = () => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
   };
+
+  // Check for sessionId in URL (after mobile redirect)
+  useEffect(() => {
+    const query = new URLSearchParams(location.search);
+    const sessionId = query.get('sessionId');
+    if (sessionId && !mobileSessionId) {
+      setMobileSessionId(sessionId);
+      setMethod('mobile');
+      setMobileStatus('waiting');
+      // Trigger check immediately
+      api.get(`/mobile/status/${sessionId}`).then(response => {
+        if (response.data.status === 'completed') {
+          checkMobileStatus(sessionId);
+        }
+      });
+    }
+  }, [location, mobileSessionId]);
 
   // Mobile session logic - unified
   useEffect(() => {
@@ -57,9 +75,12 @@ const PrePurchase = () => {
     }
   };
 
-  const checkMobileStatus = async () => {
+  const checkMobileStatus = async (id = null) => {
+    const targetId = id || mobileSessionId;
+    if (!targetId) return;
+
     try {
-      const response = await api.get(`/mobile/status/${mobileSessionId}`);
+      const response = await api.get(`/mobile/status/${targetId}`);
       if (response.data.status === 'completed') {
         if (response.data.barcode_data) {
           setFormData(prev => ({ ...prev, barcode: response.data.barcode_data }));
@@ -117,13 +138,7 @@ const PrePurchase = () => {
         barcode: ''
       });
 
-      setAnalysis({
-        carbon_footprint: response.data.carbon_footprint,
-        eco_score: response.data.eco_score,
-        alternatives: response.data.alternatives,
-        impact: response.data.impact,
-        breakdown: response.data.breakdown
-      });
+      setAnalysis(response.data);
 
       toast.success('Photo analyzed successfully!');
     } catch (error) {
@@ -159,7 +174,8 @@ const PrePurchase = () => {
         category: formData.category,
         product_name: formData.product_name,
         product_details: formData.product_details,
-        barcode: formData.barcode
+        barcode: formData.barcode,
+        ...analysis
       });
       toast.success('Product logged successfully!');
       navigate('/dashboard');
@@ -171,12 +187,12 @@ const PrePurchase = () => {
   return (
     <div className="min-h-screen" data-testid="pre-purchase-page">
       {/* Header */}
-      <div className="bg-white shadow-sm">
+      <div className="bg-white shadow-sm sticky top-0 z-50">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-10 py-4">
           <button
             data-testid="back-btn"
             onClick={() => navigate('/dashboard')}
-            className="flex items-center gap-2 text-green-600 hover:text-green-700 font-medium"
+            className="flex items-center gap-2 text-green-600 hover:text-green-700 font-medium text-sm sm:text-base transition-colors"
           >
             <ArrowLeft className="w-5 h-5" /> Back to Dashboard
           </button>
@@ -184,12 +200,12 @@ const PrePurchase = () => {
       </div>
 
       <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-10 py-12">
-        <div className="text-center mb-8">
-          <div className="flex justify-center mb-4">
-            <Search className="w-12 h-12 text-green-600" />
+        <div className="text-center mb-6 sm:mb-8">
+          <div className="flex justify-center mb-3 sm:mb-4">
+            <Search className="w-10 h-10 sm:w-12 h-12 text-green-600" />
           </div>
-          <h1 className="text-4xl font-bold text-green-800 mb-3">Pre-Purchase Inquiry</h1>
-          <p className="text-lg text-green-600">
+          <h1 className="text-3xl sm:text-4xl font-bold text-green-800 mb-2 sm:mb-3 leading-tight">Pre-Purchase Inquiry</h1>
+          <p className="text-base sm:text-lg text-green-600 px-4">
             Check the environmental impact before making a purchase decision.
           </p>
         </div>
@@ -197,27 +213,27 @@ const PrePurchase = () => {
         {/* Method Selection */}
         <div className="card mb-6">
           <h3 className="text-lg font-semibold text-green-800 mb-4">Choose Inquiry Method</h3>
-          <div className="grid md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <button
               onClick={() => setMethod('manual')}
-              className={`p-4 rounded-lg border-2 transition-all ${method === 'manual'
+              className={`p-4 rounded-xl border-2 transition-all active:scale-95 ${method === 'manual'
                 ? 'border-green-600 bg-green-50'
                 : 'border-green-200 hover:border-green-400'
                 }`}
             >
-              <p className="font-semibold text-green-800">Manual Entry</p>
-              <p className="text-sm text-green-600 mt-1">Type details</p>
+              <p className="font-bold text-green-800">Manual Entry</p>
+              <p className="text-xs text-green-600 mt-1 uppercase tracking-tight font-black">Type details</p>
             </button>
 
             <button
               onClick={() => setMethod('photo')}
-              className={`p-4 rounded-lg border-2 transition-all ${method === 'photo'
+              className={`p-4 rounded-xl border-2 transition-all active:scale-95 ${method === 'photo'
                 ? 'border-blue-600 bg-blue-50'
                 : 'border-green-200 hover:border-green-400'
                 }`}
             >
-              <p className="font-semibold text-green-800">Photo Upload</p>
-              <p className="text-sm text-green-600 mt-1">Use local file</p>
+              <p className="font-bold text-green-800">Photo Upload</p>
+              <p className="text-xs text-green-600 mt-1 uppercase tracking-tight font-black">Use local file</p>
             </button>
 
             <button
@@ -225,14 +241,14 @@ const PrePurchase = () => {
                 setMethod('mobile');
                 if (!isMobile) initializeMobileSession();
               }}
-              className={`p-4 rounded-lg border-2 transition-all text-center ${method === 'mobile'
+              className={`p-4 rounded-xl border-2 transition-all text-center active:scale-95 ${method === 'mobile'
                 ? 'border-blue-600 bg-blue-50'
                 : 'border-green-200 hover:border-green-400'
                 }`}
             >
-              <Smartphone className="w-6 h-6 mx-auto mb-2 text-green-600" />
-              <p className="font-semibold text-green-800">Use Phone Camera</p>
-              <p className="text-sm text-green-600 mt-1">{isMobile ? 'Live Scanner' : 'Scan via Mobile'}</p>
+              <Smartphone className="w-5 h-5 mx-auto mb-1 text-green-600" />
+              <p className="font-bold text-green-800">Use Phone Camera</p>
+              <p className="text-xs text-green-600 mt-1 uppercase tracking-tight font-black">{isMobile ? 'Live Scanner' : 'Scan via Mobile'}</p>
             </button>
           </div>
         </div>
@@ -266,7 +282,7 @@ const PrePurchase = () => {
                 </p>
                 <div className="grid grid-cols-2 gap-4 w-full">
                   <button
-                    onClick={() => navigate(`/mobile-scanner/${mobileSessionId || 'temp'}`)}
+                    onClick={() => navigate(`/mobile-scanner/${mobileSessionId || 'temp'}?type=pre`)}
                     className="btn-primary py-4 flex flex-col items-center gap-1"
                   >
                     <div className="flex justify-center">
@@ -277,7 +293,7 @@ const PrePurchase = () => {
                     <span>Scan Barcode</span>
                   </button>
                   <button
-                    onClick={() => navigate(`/mobile-upload/${mobileSessionId || 'temp'}`)}
+                    onClick={() => navigate(`/mobile-upload/${mobileSessionId || 'temp'}?type=pre`)}
                     className="bg-slate-900 hover:bg-slate-800 text-white rounded-2xl py-4 flex flex-col items-center gap-1 transition-all active:scale-95"
                   >
                     <Camera className="w-5 h-5" />
@@ -438,7 +454,7 @@ const PrePurchase = () => {
             <div className="card bg-gradient-to-br from-green-50 to-emerald-50">
               <h3 className="text-2xl font-bold text-green-800 mb-4">Analysis Results</h3>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 mb-8">
                 {/* KPI Card: Carbon Footprint */}
                 <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 relative overflow-hidden group hover:shadow-md transition-all">
                   <div className="absolute top-0 right-0 w-24 h-24 -mr-8 -mt-8 bg-emerald-50 rounded-full group-hover:bg-emerald-100 transition-colors"></div>
@@ -496,55 +512,86 @@ const PrePurchase = () => {
                       Discovery & Findings
                     </h3>
 
-                    {(() => {
-                      const text = analysis.impact;
-                      if (!text) return null;
-
-                      // Intelligent splitting - handles both newlines and dense blocks
-                      const segments = text.split(/(\d+\.\s+[^:]+:)/).filter(Boolean);
-                      const points = [];
-
-                      if (segments.length > 1) {
-                        for (let i = 0; i < segments.length; i++) {
-                          if (segments[i].match(/^\d+\.\s+[^:]+:$/)) {
-                            points.push({ title: segments[i], content: segments[i + 1] || "" });
-                            i++;
-                          } else if (segments[i].trim()) {
-                            points.push({ title: "Observation", content: segments[i] });
-                          }
-                        }
-                      } else {
-                        // Fallback to newline split if no patterns found
-                        text.split('\n').filter(l => l.trim()).forEach(l => {
-                          const m = l.match(/^(\d+\.\s+[^:]+:)(.*)/);
-                          if (m) points.push({ title: m[1], content: m[2] });
-                          else points.push({ title: "Context", content: l });
-                        });
-                      }
-
-                      return (
-                        <div className="flex flex-col gap-4">
-                          {points.map((point, idx) => (
-                            <div key={idx} className="bg-white rounded-xl p-5 shadow-sm border border-green-100 hover:shadow-md transition-all group relative overflow-hidden">
-                              <div className="absolute top-0 left-0 w-1.5 h-full bg-green-500"></div>
-                              <div className="flex items-center gap-3 mb-2">
-                                <span className="flex-shrink-0 w-6 h-6 rounded bg-green-50 flex items-center justify-center text-[10px] font-extrabold text-green-600 border border-green-100 uppercase">
-                                  {idx + 1}
-                                </span>
-                                <h4 className="text-sm font-black text-green-900 uppercase tracking-widest group-hover:text-green-700 transition-colors">
-                                  {point.title.replace(/^\d+\.\s*/, '').replace(/:$/, '')}
-                                </h4>
+                    {analysis.detected_item ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                        {[
+                          { label: "Detected Item", value: analysis.detected_item, icon: <Search size={14} /> },
+                          { label: "Assumptions", value: analysis.assumptions, icon: <Info size={14} /> },
+                          { label: "Data Source", value: analysis.data_source, icon: <Database size={14} /> },
+                          { label: "Why it emits", value: analysis.why_it_emits, icon: <Zap size={14} /> },
+                          { label: "Better Choice", value: analysis.better_choice, icon: <CheckCircle size={14} className="text-green-500" /> },
+                          { label: "Expected Saving", value: analysis.expected_saving, icon: <TrendingUp size={14} /> },
+                          { label: "Carbon Saved", value: analysis.carbon_saved, icon: <Leaf size={14} /> }
+                        ].filter(f => f.value).map((field, i) => (
+                          <div key={i} className="bg-white rounded-xl p-4 sm:p-5 shadow-sm border border-green-100 hover:shadow-md transition-all group relative overflow-hidden">
+                            <div className="absolute top-0 left-0 w-1 h-full bg-green-500"></div>
+                            <div className="flex items-center gap-2 sm:gap-3 mb-2">
+                              <div className="p-1 sm:p-1.5 bg-green-50 rounded-lg text-green-600 shrink-0">
+                                {field.icon}
                               </div>
-                              <div className="pl-9">
-                                <p className="text-sm text-slate-700 leading-relaxed font-medium">
-                                  {point.content.trim()}
-                                </p>
-                              </div>
+                              <h4 className="text-[10px] sm:text-xs font-black text-green-900 uppercase tracking-widest group-hover:text-green-700 transition-colors">
+                                {field.label}
+                              </h4>
                             </div>
-                          ))}
-                        </div>
-                      );
-                    })()}
+                            <div className="pl-7 sm:pl-9">
+                              <p className="text-[11px] sm:text-xs text-slate-700 leading-relaxed font-medium">
+                                {field.value}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      (() => {
+                        const text = analysis.impact;
+                        if (!text) return null;
+
+                        // Intelligent splitting - handles both newlines and dense blocks
+                        const segments = text.split(/(\d+\.\s+[^:]+:)/).filter(Boolean);
+                        const points = [];
+
+                        if (segments.length > 1) {
+                          for (let i = 0; i < segments.length; i++) {
+                            if (segments[i].match(/^\d+\.\s+[^:]+:$/)) {
+                              points.push({ title: segments[i], content: segments[i + 1] || "" });
+                              i++;
+                            } else if (segments[i].trim()) {
+                              points.push({ title: "Observation", content: segments[i] });
+                            }
+                          }
+                        } else {
+                          // Fallback to newline split if no patterns found
+                          text.split('\n').filter(l => l.trim()).forEach(l => {
+                            const m = l.match(/^(\d+\.\s+[^:]+:)(.*)/);
+                            if (m) points.push({ title: m[1], content: m[2] });
+                            else points.push({ title: "Context", content: l });
+                          });
+                        }
+
+                        return (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+                            {points.map((point, idx) => (
+                              <div key={idx} className="bg-white rounded-xl p-4 sm:p-5 shadow-sm border border-green-100 hover:shadow-md transition-all group relative overflow-hidden">
+                                <div className="absolute top-0 left-0 w-1.5 h-full bg-green-500"></div>
+                                <div className="flex items-center gap-3 mb-2">
+                                  <span className="flex-shrink-0 w-6 h-6 rounded bg-green-50 flex items-center justify-center text-[10px] font-extrabold text-green-600 border border-green-100 uppercase">
+                                    {idx + 1}
+                                  </span>
+                                  <h4 className="text-xs sm:text-sm font-black text-green-900 uppercase tracking-widest group-hover:text-green-700 transition-colors">
+                                    {point.title.replace(/^\d+\.\s*/, '').replace(/:$/, '')}
+                                  </h4>
+                                </div>
+                                <div className="pl-9">
+                                  <p className="text-xs sm:text-sm text-slate-700 leading-relaxed font-medium">
+                                    {point.content.trim()}
+                                  </p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()
+                    )}
                   </div>
 
                   {/* Scientific Basis Dashboard - Collapsible */}

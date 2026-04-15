@@ -13,7 +13,7 @@ const Landing = () => {
             <div className="flex justify-center mb-6">
               <Leaf className="w-16 h-16 text-green-600" />
             </div>
-            <h1 className="text-5xl sm:text-6xl lg:text-7xl font-bold text-green-800 mb-6">
+            <h1 className="text-4xl sm:text-6xl lg:text-7xl font-bold text-green-800 mb-4 sm:mb-6">
               EcoPilot
             </h1>
             <p className="text-lg sm:text-xl text-green-700 mb-4 max-w-3xl mx-auto">

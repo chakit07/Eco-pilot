@@ -13,7 +13,12 @@ body {
   overflow-x: hidden;
 }
 
-h1, h2, h3, h4, h5, h6 {
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
   font-family: 'Space Grotesk', sans-serif;
 }
 
@@ -73,9 +78,15 @@ h1, h2, h3, h4, h5, h6 {
   background: rgba(255, 255, 255, 0.9);
   backdrop-filter: blur(12px);
   border-radius: 16px;
-  padding: 24px;
+  padding: 1rem;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
   transition: transform 0.2s, box-shadow 0.2s;
+}
+
+@media (min-width: 640px) {
+  .card {
+    padding: 1.5rem;
+  }
 }
 
 .card:hover {
@@ -84,7 +95,9 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 /* Input Styles */
-input, select, textarea {
+input,
+select,
+textarea {
   width: 100%;
   padding: 12px 16px;
   border: 2px solid #c8e6c9;
@@ -94,7 +107,9 @@ input, select, textarea {
   background: white;
 }
 
-input:focus, select:focus, textarea:focus {
+input:focus,
+select:focus,
+textarea:focus {
   outline: none;
   border-color: #43a047;
 }
@@ -112,6 +127,7 @@ label {
     opacity: 0;
     transform: translateY(20px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -134,5 +150,7 @@ label {
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
