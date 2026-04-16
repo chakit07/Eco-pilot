@@ -12,6 +12,8 @@ const MobileScanner = () => {
     const [scanning, setScanning] = useState(false);
     const [initializing, setInitializing] = useState(false);
     const [success, setSuccess] = useState(false);
+    const [availableCameras, setAvailableCameras] = useState([]);
+    const [currentCameraIndex, setCurrentCameraIndex] = useState(0);
 
     const query = new URLSearchParams(location.search);
     const type = query.get('type');
@@ -36,7 +38,6 @@ const MobileScanner = () => {
 
             setInitializing(true);
             try {
-                // Check if an instance already exists and stop it
                 if (qrCodeInstance.current) {
                     try { await qrCodeInstance.current.stop(); } catch (e) {}
                 }
@@ -45,41 +46,39 @@ const MobileScanner = () => {
                 qrCodeInstance.current = instance;
 
                 const config = {
-                    fps: 10,
+                    fps: 15, // Slightly higher for smoother feed
                     qrbox: { width: 250, height: 250 },
-                    // Relaxed constraints for better compatibility
+                    aspectRatio: { ideal: 1.7777777778 } // 16:9 is standard for mobile
                 };
 
-                // Search for the back camera explicitly
-                let cameraId = null;
-                try {
-                    const devices = await Html5Qrcode.getCameras();
-                    if (devices && devices.length > 0) {
-                        // Priority 1: Labels with 'back', 'rear', or 'environment'
-                        const backCamera = devices.find(device => 
-                            device.label.toLowerCase().includes('back') || 
-                            device.label.toLowerCase().includes('rear') ||
-                            device.label.toLowerCase().includes('environment')
-                        );
+                // Get all cameras if we haven't yet
+                let cameras = availableCameras;
+                if (cameras.length === 0) {
+                    try {
+                        cameras = await Html5Qrcode.getCameras();
+                        setAvailableCameras(cameras);
                         
-                        if (backCamera) {
-                            cameraId = backCamera.id;
-                        } else if (devices.length > 1) {
-                            // Priority 2: Usually the last camera in the list is the primary back camera
-                            cameraId = devices[devices.length - 1].id;
-                        } else {
-                            cameraId = devices[0].id;
+                        // Initial best-guess index (prefer back camera)
+                        if (cameras.length > 0) {
+                            const backIdx = cameras.findIndex(d => 
+                                d.label.toLowerCase().includes('back') || 
+                                d.label.toLowerCase().includes('rear') ||
+                                d.label.toLowerCase().includes('environment')
+                            );
+                            if (backIdx !== -1) setCurrentCameraIndex(backIdx);
+                            else if (cameras.length > 1) setCurrentCameraIndex(cameras.length - 1);
                         }
+                    } catch (e) {
+                        console.warn("Camera enumeration failed", e);
                     }
-                } catch (e) {
-                    console.warn("Could not enumerate cameras, falling back to constraints", e);
                 }
 
-                // If we found a specific ID, use it; otherwise fallback to general requirement
-                const cameraTarget = cameraId ? cameraId : { facingMode: "environment" };
+                const target = cameras.length > 0 
+                    ? cameras[currentCameraIndex].id 
+                    : { facingMode: "environment" };
 
                 await instance.start(
-                    cameraTarget,
+                    target,
                     config,
                     async (decodedText) => {
                         if (!isMuted) {
@@ -87,33 +86,42 @@ const MobileScanner = () => {
                             await handleScanSuccess(decodedText);
                         }
                     },
-                    (errorMessage) => {
-                        // Suppress frame capture errors
-                    }
+                    (errorMessage) => {}
                 );
+
+                // Force visibility styles once started
+                const videoElement = document.querySelector("#reader video");
+                if (videoElement) {
+                    videoElement.style.width = "100%";
+                    videoElement.style.height = "100%";
+                    videoElement.style.objectFit = "cover";
+                    videoElement.style.borderRadius = "1.5rem";
+                }
+
                 setInitializing(false);
             } catch (err) {
-                console.error("Scanner start error:", err);
+                console.error("Scanner error:", err);
                 setInitializing(false);
-                setScanning(false);
-
-                if (err.toString().includes("NotAllowedError") || err.toString().includes("Permission denied")) {
-                    setError("Camera permission denied. Please check your browser settings.");
-                } else {
-                    setError("Could not access camera. Please try refreshing or ensuring no other app is using it.");
-                }
+                setError(err.toString().includes("NotAllowed") 
+                    ? "Camera permission denied." 
+                    : "Could not start camera. Try switching mode.");
             }
         }
 
         if (scanning) {
-            // Small delay to ensure React has painted the 'reader' div
-            const timer = setTimeout(startLiveScanner, 100);
+            const timer = setTimeout(startLiveScanner, 150);
             return () => {
                 clearTimeout(timer);
                 isMuted = true;
             };
         }
-    }, [scanning]);
+    }, [scanning, currentCameraIndex]);
+
+    const switchCamera = async () => {
+        if (availableCameras.length <= 1) return;
+        const nextIndex = (currentCameraIndex + 1) % availableCameras.length;
+        setCurrentCameraIndex(nextIndex);
+    };
 
     const startScanner = async () => {
         setError(null);
@@ -191,18 +199,29 @@ const MobileScanner = () => {
                     )}
 
                     {scanning && (
-                        <div className="w-full h-full flex flex-col items-center animate-in fade-in duration-500">
-                            {initializing ? (
-                                <div className="flex flex-col items-center justify-center space-y-4 py-20">
+                        <div className="w-full h-full flex flex-col items-center animate-in fade-in duration-500 relative">
+                            {initializing && (
+                                <div className="absolute inset-0 z-20 flex flex-col items-center justify-center space-y-4 bg-slate-900/90 backdrop-blur-md rounded-2xl">
                                     <Loader2 className="w-12 h-12 text-green-500 animate-spin" />
-                                    <p className="text-slate-400 font-medium animate-pulse">Initializing camera...</p>
+                                    <p className="text-slate-400 font-medium animate-pulse">Waking up camera...</p>
                                 </div>
-                            ) : null}
+                            )}
 
                             <div
                                 id="reader"
-                                className={`w-full min-h-[300px] rounded-2xl overflow-hidden border-2 border-green-500/50 shadow-2xl shadow-green-500/10 bg-black ${initializing ? 'hidden' : 'block'}`}
+                                className="w-full min-h-[300px] rounded-2xl overflow-hidden border-2 border-green-500/50 shadow-2xl shadow-green-500/10 bg-slate-900 transition-all duration-300"
                             ></div>
+
+                            {/* Camera Switcher Button */}
+                            {!initializing && availableCameras.length > 1 && (
+                                <button
+                                    onClick={switchCamera}
+                                    className="absolute top-4 right-4 z-30 bg-white/10 hover:bg-white/20 backdrop-blur-md p-3 rounded-full border border-white/20 transition-all active:scale-90"
+                                    title="Switch Camera"
+                                >
+                                    <Camera className="w-5 h-5 text-white" />
+                                </button>
+                            )}
 
                             {!initializing && (
                                 <div className="mt-8 px-6 py-2 bg-green-500/10 rounded-full border border-green-500/20">
