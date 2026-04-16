@@ -307,13 +307,20 @@ const MobileScanner = () => {
                                 >
                                     Try Again
                                 </button>
-                                <button
-                                    onClick={() => window.location.href = `/mobile-upload/${sessionId}`}
-                                    className="w-full bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 font-bold py-4 px-8 rounded-2xl transition-all active:scale-95"
-                                >
-                                    Switch to Photo Mode
-                                </button>
                             </div>
+                        </div>
+                    )}
+
+                    {/* Universal Feedback/Photo Fallback */}
+                    {!success && (
+                        <div className="mt-8 pt-6 border-t border-slate-800/50 w-full flex flex-col items-center gap-4">
+                            <button
+                                onClick={() => window.location.href = `/mobile-upload/${sessionId}${type ? `?type=${type}` : ''}`}
+                                className="text-slate-500 hover:text-green-500 text-[10px] font-black uppercase tracking-[0.2em] transition-all flex items-center gap-2 group"
+                            >
+                                <Camera className="w-4 h-4 group-hover:scale-110 transition-transform" />
+                                Switch to Photo Mode
+                            </button>
                         </div>
                     )}
                 </div>
