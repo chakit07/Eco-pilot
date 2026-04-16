@@ -1,19 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Html5Qrcode } from 'html5-qrcode';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import axios from 'axios';
+import api from '@/lib/api';
 import { toast } from 'sonner';
 import { Loader2, Camera, CheckCircle2, AlertCircle } from 'lucide-react';
-
-const getBackendUrl = () => {
-    const envUrl = process.env.REACT_APP_BACKEND_URL;
-    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-        return `http://${window.location.hostname}:8000`;
-    }
-    if (envUrl && !envUrl.includes('localhost')) return envUrl;
-    return 'http://localhost:8000';
-};
-const BACKEND_URL = getBackendUrl();
 
 const MobileScanner = () => {
     const { sessionId } = useParams();
@@ -120,7 +110,7 @@ const MobileScanner = () => {
             }
 
             setScanning(false);
-            await axios.post(`${BACKEND_URL}/api/mobile/barcode/${sessionId}`, {
+            await api.post(`/mobile/barcode/${sessionId}`, {
                 barcode: decodedText
             });
 

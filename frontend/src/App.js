@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import '@/App.css';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
-import axios from 'axios';
 import Landing from './pages/Landing';
 import Auth from './pages/Auth';
 import Dashboard from './pages/Dashboard';
@@ -11,21 +10,11 @@ import ImpactDashboard from './pages/ImpactDashboard';
 import MobileCamera from './pages/MobileCamera';
 import MobileScanner from './pages/MobileScanner';
 
-const getBackendUrl = () => {
-  const envUrl = process.env.REACT_APP_BACKEND_URL;
-  if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-    return `http://${window.location.hostname}:8000`;
-  }
-  if (envUrl && !envUrl.includes('localhost')) return envUrl;
-  return 'http://localhost:8000';
-};
+import api, { API_BASE_URL } from '@/lib/api';
 
-const BACKEND_URL = getBackendUrl();
-const API = `${BACKEND_URL}/api`;
+const API = API_BASE_URL;
 
-export const api = axios.create({
-  baseURL: API,
-});
+export { api };
 
 // Add auth token to requests
 api.interceptors.request.use((config) => {

@@ -1,18 +1,8 @@
 import { useRef, useState } from 'react';
 import { Camera, RefreshCw } from 'lucide-react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import axios from 'axios';
+import api from '@/lib/api';
 import { toast } from 'sonner';
-
-const getBackendUrl = () => {
-    const envUrl = process.env.REACT_APP_BACKEND_URL;
-    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-        return `http://${window.location.hostname}:8000`;
-    }
-    if (envUrl && !envUrl.includes('localhost')) return envUrl;
-    return 'http://localhost:8000';
-};
-const BACKEND_URL = getBackendUrl();
 
 const MobileCamera = () => {
     const { sessionId } = useParams();
@@ -34,7 +24,7 @@ const MobileCamera = () => {
         formData.append('file', file);
 
         try {
-            await axios.post(`${BACKEND_URL}/api/mobile/upload/${sessionId}`, formData, {
+            await api.post(`/mobile/upload/${sessionId}`, formData, {
                 headers: {
                     'Content-Type': 'multipart/form-data',
                 },
