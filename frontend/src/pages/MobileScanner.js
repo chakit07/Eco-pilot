@@ -36,17 +36,50 @@ const MobileScanner = () => {
 
             setInitializing(true);
             try {
+                // Check if an instance already exists and stop it
+                if (qrCodeInstance.current) {
+                    try { await qrCodeInstance.current.stop(); } catch (e) {}
+                }
+
                 const instance = new Html5Qrcode("reader");
                 qrCodeInstance.current = instance;
 
                 const config = {
                     fps: 10,
                     qrbox: { width: 250, height: 250 },
-                    aspectRatio: 1.0
+                    // Relaxed constraints for better compatibility
                 };
 
+                // Search for the back camera explicitly
+                let cameraId = null;
+                try {
+                    const devices = await Html5Qrcode.getCameras();
+                    if (devices && devices.length > 0) {
+                        // Priority 1: Labels with 'back', 'rear', or 'environment'
+                        const backCamera = devices.find(device => 
+                            device.label.toLowerCase().includes('back') || 
+                            device.label.toLowerCase().includes('rear') ||
+                            device.label.toLowerCase().includes('environment')
+                        );
+                        
+                        if (backCamera) {
+                            cameraId = backCamera.id;
+                        } else if (devices.length > 1) {
+                            // Priority 2: Usually the last camera in the list is the primary back camera
+                            cameraId = devices[devices.length - 1].id;
+                        } else {
+                            cameraId = devices[0].id;
+                        }
+                    }
+                } catch (e) {
+                    console.warn("Could not enumerate cameras, falling back to constraints", e);
+                }
+
+                // If we found a specific ID, use it; otherwise fallback to general requirement
+                const cameraTarget = cameraId ? cameraId : { facingMode: "environment" };
+
                 await instance.start(
-                    { facingMode: "environment" },
+                    cameraTarget,
                     config,
                     async (decodedText) => {
                         if (!isMuted) {
@@ -55,7 +88,7 @@ const MobileScanner = () => {
                         }
                     },
                     (errorMessage) => {
-                        // Suppress noisy frame errors
+                        // Suppress frame capture errors
                     }
                 );
                 setInitializing(false);
@@ -65,9 +98,9 @@ const MobileScanner = () => {
                 setScanning(false);
 
                 if (err.toString().includes("NotAllowedError") || err.toString().includes("Permission denied")) {
-                    setError("Camera permission denied. Please enable camera access in your browser settings and try again.");
+                    setError("Camera permission denied. Please check your browser settings.");
                 } else {
-                    setError("Could not access camera. Please ensure you've given permission and aren't using another app that's using the camera.");
+                    setError("Could not access camera. Please try refreshing or ensuring no other app is using it.");
                 }
             }
         }
@@ -88,21 +121,12 @@ const MobileScanner = () => {
 
         // Security Check: Modern browsers require HTTPS for camera access
         if (!window.isSecureContext && window.location.hostname !== 'localhost') {
-            setError("BROWSER SECURITY BLOCK: Camera access requires a secure connection (HTTPS). Since you are on a local network (http), the live scanner is blocked by your browser.");
+            setError("BROWSER SECURITY BLOCK: Camera access requires a secure connection (HTTPS).");
             return;
         }
 
-        // Explicitly request permission first to "warm up" the camera and satisfy browser requirements
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ 
-                video: { facingMode: "environment" } 
-            });
-            stream.getTracks().forEach(track => track.stop()); // Stop immediately, we just wanted permission
-            setScanning(true);
-        } catch (err) {
-            console.error("Permission request error:", err);
-            setError("Camera permission denied. Please allow camera access to use the scanner.");
-        }
+        // Just trigger the scan state; the useEffect will handle the robust initialization
+        setScanning(true);
     };
 
     const handleScanSuccess = async (decodedText) => {
@@ -177,7 +201,7 @@ const MobileScanner = () => {
 
                             <div
                                 id="reader"
-                                className={`w-full rounded-2xl overflow-hidden border-2 border-green-500/50 shadow-2xl shadow-green-500/10 ${initializing ? 'hidden' : 'block'}`}
+                                className={`w-full min-h-[300px] rounded-2xl overflow-hidden border-2 border-green-500/50 shadow-2xl shadow-green-500/10 bg-black ${initializing ? 'hidden' : 'block'}`}
                             ></div>
 
                             {!initializing && (
