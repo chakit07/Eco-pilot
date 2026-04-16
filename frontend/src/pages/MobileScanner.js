@@ -48,40 +48,54 @@ const MobileScanner = () => {
                 const instance = new Html5Qrcode("reader", { verbose: false });
                 qrCodeInstance.current = instance;
 
-                // Step 1: Warm up to get labels (Crucial for identifying back camera)
-                let cameras = availableCameras;
-                if (cameras.length === 0) {
+                // Step 1: Enumeration (Keep it async but separate from start)
+                if (availableCameras.length === 0) {
                     try {
-                        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-                        cameras = await Html5Qrcode.getCameras();
-                        stream.getTracks().forEach(t => t.stop());
-                        setAvailableCameras(cameras);
-                        setDebugInfo(cameras.map(c => `${c.label || 'Unknown'} [${c.id.substring(0,8)}]`).join('\n'));
-                        
-                        // Pick back camera if possible
-                        const backIdx = cameras.findIndex(d => 
-                            d.label.toLowerCase().includes('back') || 
-                            d.label.toLowerCase().includes('rear') ||
-                            d.label.toLowerCase().includes('environment')
-                        );
-                        if (backIdx !== -1) setCurrentCameraIndex(backIdx);
+                        const devices = await Html5Qrcode.getCameras();
+                        if (devices && devices.length > 0) {
+                            setAvailableCameras(devices);
+                            setDebugInfo(devices.map((c, i) => `${i}: ${c.label || 'Unnamed'} [${c.id.substring(0,6)}]`).join('\n'));
+                            
+                            // Try to guess the best back camera index for switching purposes
+                            const backIdx = devices.findIndex(d => 
+                                d.label.toLowerCase().includes('back') || 
+                                d.label.toLowerCase().includes('rear') ||
+                                d.label.toLowerCase().includes('environment') ||
+                                d.label.toLowerCase().includes('camera 1') ||
+                                d.label.toLowerCase().includes('main')
+                            );
+                            
+                            if (backIdx !== -1) {
+                                setCurrentCameraIndex(backIdx);
+                            } else if (devices.length > 1) {
+                                // Default to last camera if no labels found (often the back one)
+                                setCurrentCameraIndex(devices.length - 1);
+                            }
+                        }
                     } catch (e) {
-                        console.warn("Warmup failed", e);
-                        setDebugInfo("Warmup failed: " + e.message);
+                        console.warn("Enum failed", e);
                     }
                 }
 
-                // Step 2: Configure for maximum compatibility
+                // Step 2: Minimalist Config
                 const config = {
                     fps: 10,
-                    qrbox: { width: 250, height: 250 },
-                    // Removed aspectRatio to prevent driver-level failures
+                    qrbox: (viewWidth, viewHeight) => {
+                        const size = Math.min(viewWidth, viewHeight) * 0.7;
+                        return { width: size, height: size };
+                    }
                 };
 
-                // Step 3: Start with facingMode fallback if explicit ID fails
-                const target = cameras.length > 0 
-                    ? cameras[currentCameraIndex % cameras.length].id 
-                    : { facingMode: "environment" };
+                // Step 3: THE FIX - Start with facingMode directly if it's the first attempt
+                // Most browsers handle 'environment' correctly on their own.
+                let target;
+                if (currentCameraIndex === 0 && availableCameras.length === 0) {
+                    target = { facingMode: "environment" };
+                } else if (availableCameras.length > 0) {
+                    target = availableCameras[currentCameraIndex % availableCameras.length].id;
+                } else {
+                    target = { facingMode: "environment" };
+                }
 
                 await instance.start(
                     target,
@@ -92,22 +106,25 @@ const MobileScanner = () => {
                             await handleScanSuccess(decodedText);
                         }
                     },
-                    () => {}
+                    () => {} // Suppress noise
                 );
 
-                // Step 4: Final forced UI tweaks
+                // Step 4: Forced Rendering
                 const v = document.querySelector("#reader video");
                 if (v) {
-                    v.style.cssText = "width:100% !important; height:100% !important; object-fit:cover !important; border-radius:1.5rem;";
-                    v.setAttribute('playsinline', 'true');
-                    try { await v.play(); } catch(e) {}
+                    v.style.cssText = "width:100% !important; height:100% !important; object-fit:cover !important; border-radius:1.5rem; display:block !important;";
+                    v.setAttribute('autoplay', '');
+                    v.setAttribute('muted', '');
+                    v.setAttribute('playsinline', '');
+                    // Some browsers need a slight delay before play()
+                    setTimeout(() => v.play().catch(() => {}), 100);
                 }
 
                 setInitializing(false);
             } catch (err) {
                 console.error("Scanner error:", err);
                 setInitializing(false);
-                setError(`ERR: ${err.message || err.toString()}. Tap 'Try Again' or use 'Photo Mode'.`);
+                setError(`Failed to open camera: ${err.message || err.toString()}. Please ensure you are on a secure connection and have granted permission.`);
             }
         }
 
