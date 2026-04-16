@@ -14,6 +14,8 @@ const MobileScanner = () => {
     const [success, setSuccess] = useState(false);
     const [availableCameras, setAvailableCameras] = useState([]);
     const [currentCameraIndex, setCurrentCameraIndex] = useState(0);
+    const [debugInfo, setDebugInfo] = useState("");
+    const [showDebug, setShowDebug] = useState(false);
 
     const query = new URLSearchParams(location.search);
     const type = query.get('type');
@@ -37,44 +39,48 @@ const MobileScanner = () => {
             if (!scanning || !document.getElementById("reader")) return;
 
             setInitializing(true);
+            setError(null);
             try {
                 if (qrCodeInstance.current) {
                     try { await qrCodeInstance.current.stop(); } catch (e) {}
                 }
 
-                const instance = new Html5Qrcode("reader");
+                const instance = new Html5Qrcode("reader", { verbose: false });
                 qrCodeInstance.current = instance;
 
-                const config = {
-                    fps: 15, // Slightly higher for smoother feed
-                    qrbox: { width: 250, height: 250 },
-                    aspectRatio: { ideal: 1.7777777778 } // 16:9 is standard for mobile
-                };
-
-                // Get all cameras if we haven't yet
+                // Step 1: Warm up to get labels (Crucial for identifying back camera)
                 let cameras = availableCameras;
                 if (cameras.length === 0) {
                     try {
+                        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
                         cameras = await Html5Qrcode.getCameras();
+                        stream.getTracks().forEach(t => t.stop());
                         setAvailableCameras(cameras);
+                        setDebugInfo(cameras.map(c => `${c.label || 'Unknown'} [${c.id.substring(0,8)}]`).join('\n'));
                         
-                        // Initial best-guess index (prefer back camera)
-                        if (cameras.length > 0) {
-                            const backIdx = cameras.findIndex(d => 
-                                d.label.toLowerCase().includes('back') || 
-                                d.label.toLowerCase().includes('rear') ||
-                                d.label.toLowerCase().includes('environment')
-                            );
-                            if (backIdx !== -1) setCurrentCameraIndex(backIdx);
-                            else if (cameras.length > 1) setCurrentCameraIndex(cameras.length - 1);
-                        }
+                        // Pick back camera if possible
+                        const backIdx = cameras.findIndex(d => 
+                            d.label.toLowerCase().includes('back') || 
+                            d.label.toLowerCase().includes('rear') ||
+                            d.label.toLowerCase().includes('environment')
+                        );
+                        if (backIdx !== -1) setCurrentCameraIndex(backIdx);
                     } catch (e) {
-                        console.warn("Camera enumeration failed", e);
+                        console.warn("Warmup failed", e);
+                        setDebugInfo("Warmup failed: " + e.message);
                     }
                 }
 
+                // Step 2: Configure for maximum compatibility
+                const config = {
+                    fps: 10,
+                    qrbox: { width: 250, height: 250 },
+                    // Removed aspectRatio to prevent driver-level failures
+                };
+
+                // Step 3: Start with facingMode fallback if explicit ID fails
                 const target = cameras.length > 0 
-                    ? cameras[currentCameraIndex].id 
+                    ? cameras[currentCameraIndex % cameras.length].id 
                     : { facingMode: "environment" };
 
                 await instance.start(
@@ -86,25 +92,22 @@ const MobileScanner = () => {
                             await handleScanSuccess(decodedText);
                         }
                     },
-                    (errorMessage) => {}
+                    () => {}
                 );
 
-                // Force visibility styles once started
-                const videoElement = document.querySelector("#reader video");
-                if (videoElement) {
-                    videoElement.style.width = "100%";
-                    videoElement.style.height = "100%";
-                    videoElement.style.objectFit = "cover";
-                    videoElement.style.borderRadius = "1.5rem";
+                // Step 4: Final forced UI tweaks
+                const v = document.querySelector("#reader video");
+                if (v) {
+                    v.style.cssText = "width:100% !important; height:100% !important; object-fit:cover !important; border-radius:1.5rem;";
+                    v.setAttribute('playsinline', 'true');
+                    try { await v.play(); } catch(e) {}
                 }
 
                 setInitializing(false);
             } catch (err) {
                 console.error("Scanner error:", err);
                 setInitializing(false);
-                setError(err.toString().includes("NotAllowed") 
-                    ? "Camera permission denied." 
-                    : "Could not start camera. Try switching mode.");
+                setError(`ERR: ${err.message || err.toString()}. Tap 'Try Again' or use 'Photo Mode'.`);
             }
         }
 
@@ -203,7 +206,7 @@ const MobileScanner = () => {
                             {initializing && (
                                 <div className="absolute inset-0 z-20 flex flex-col items-center justify-center space-y-4 bg-slate-900/90 backdrop-blur-md rounded-2xl">
                                     <Loader2 className="w-12 h-12 text-green-500 animate-spin" />
-                                    <p className="text-slate-400 font-medium animate-pulse">Waking up camera...</p>
+                                    <p className="text-slate-400 font-medium animate-pulse">Mastering camera lens...</p>
                                 </div>
                             )}
 
@@ -212,15 +215,32 @@ const MobileScanner = () => {
                                 className="w-full min-h-[300px] rounded-2xl overflow-hidden border-2 border-green-500/50 shadow-2xl shadow-green-500/10 bg-slate-900 transition-all duration-300"
                             ></div>
 
-                            {/* Camera Switcher Button */}
-                            {!initializing && availableCameras.length > 1 && (
+                            {/* Controls */}
+                            <div className="absolute top-4 right-4 z-30 flex flex-col gap-2">
+                                {!initializing && availableCameras.length > 1 && (
+                                    <button
+                                        onClick={switchCamera}
+                                        className="bg-white/10 hover:bg-white/20 backdrop-blur-md p-3 rounded-full border border-white/20 transition-all active:scale-90"
+                                        title="Switch Camera"
+                                    >
+                                        <Camera className="w-5 h-5 text-white" />
+                                    </button>
+                                )}
                                 <button
-                                    onClick={switchCamera}
-                                    className="absolute top-4 right-4 z-30 bg-white/10 hover:bg-white/20 backdrop-blur-md p-3 rounded-full border border-white/20 transition-all active:scale-90"
-                                    title="Switch Camera"
+                                    onClick={() => setShowDebug(!showDebug)}
+                                    className="bg-white/5 hover:bg-white/10 backdrop-blur-md p-2 rounded-lg border border-white/10 transition-all text-[10px] text-white/50"
                                 >
-                                    <Camera className="w-5 h-5 text-white" />
+                                    DEBUG
                                 </button>
+                            </div>
+
+                            {showDebug && (
+                                <div className="absolute inset-x-4 top-20 z-40 bg-black/80 backdrop-blur-xl p-4 rounded-xl border border-white/10 text-left">
+                                    <p className="text-[10px] font-mono text-green-500 mb-2 truncate">Cameras Found: {availableCameras.length}</p>
+                                    <pre className="text-[8px] font-mono text-slate-300 overflow-x-auto">
+                                        {debugInfo}
+                                    </pre>
+                                </div>
                             )}
 
                             {!initializing && (
