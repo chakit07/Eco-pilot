@@ -94,7 +94,9 @@ const MobileScanner = () => {
 
         // Explicitly request permission first to "warm up" the camera and satisfy browser requirements
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { facingMode: "environment" } 
+            });
             stream.getTracks().forEach(track => track.stop()); // Stop immediately, we just wanted permission
             setScanning(true);
         } catch (err) {
