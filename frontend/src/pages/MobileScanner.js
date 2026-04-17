@@ -168,16 +168,11 @@ const MobileScanner = () => {
                 barcode: decodedText
             });
 
-            toast.success('Barcode scanned and synced!');
-
-            if (type) {
-                // Redirect back to analysis page
-                setTimeout(() => {
-                    navigate(`/${type}-purchase?sessionId=${sessionId}`);
-                }, 1000);
-            } else {
-                setSuccess(true);
-            }
+            toast.success('Barcode synced to desktop!');
+            // Reset scan state after a short delay to allow another scan
+            setTimeout(() => {
+                setScanning(true);
+            }, 3000);
         } catch (err) {
             toast.error('Failed to sync barcode with desktop');
             setError("Sync failed. Please try again.");

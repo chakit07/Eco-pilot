@@ -749,83 +749,91 @@ async def lookup_upcitemdb(barcode: str) -> Optional[dict]:
     
     return None
 
+def extract_json(text: str) -> Optional[dict]:
+    """Robust JSON extraction from LLM response"""
+    try:
+        # First try to find a JSON block between curly braces
+        match = re.search(r'(\{.*\})', text, re.DOTALL)
+        if match:
+            return json.loads(match.group(1))
+        # Fallback to direct load
+        return json.loads(text)
+    except Exception:
+        return None
+
 async def resolve_barcode_info(barcode: str) -> dict:
-    """Hybrid Resolve: UPCitemdb lookup first, then Gemini AI for categorization/fallback"""
+    """Robust Hybrid Resolve: Database first, then Aggressive AI identification"""
     
     # 1. Try Database Lookup (UPCitemdb)
     db_info = await lookup_upcitemdb(barcode)
     
     if db_info and db_info.get('product_name'):
-        logger.info(f"Barcode {barcode} found in UPCitemdb: {db_info['product_name']}")
+        logger.info(f"Barcode {barcode} found in database: {db_info['product_name']}")
         
-        # 2. Use Gemini to "Standardize" the database response into our category format
-        prompt = f"""We found this product in a database:
-        Name: {db_info['product_name']}
-        Brand: {db_info['brand']}
-        Raw Category: {db_info['category']}
-        Description: {db_info['details']}
+        prompt = f"""Identify exactly one category for: {db_info['product_name']} ({db_info['brand']}).
+        App Categories: [electronics, clothing, food, home, vehicle, beauty, sports, books, other].
         
-        Task: Map this product to EXACTLY one of these categories: [electronics, clothing, food, home, vehicle, beauty, sports, books, other].
-        
-        Return ONLY a JSON object with:
-        - product_name (clean it up if needed)
-        - brand
-        - category
-        - details (summarize to 1 sentence)
+        Return ONLY JSON:
+        {{
+          "product_name": "{db_info['product_name']}",
+          "brand": "{db_info['brand']}",
+          "category": "chosen_category",
+          "details": "1-sentence summary"
+        }}
         """
         
         try:
             model = genai.GenerativeModel('gemini-2.0-flash')
             response = await asyncio.to_thread(model.generate_content, prompt)
-            response_text = response.text
-            if "```" in response_text:
-                response_text = re.sub(r'```[a-zA-Z]*\n?', '', response_text).strip()
+            data = extract_json(response.text)
+            if data:
+                valid_cats = ['electronics', 'clothing', 'food', 'home', 'vehicle', 'beauty', 'sports', 'books', 'other']
+                if data.get('category') not in valid_cats: data['category'] = 'other'
+                return data
+        except Exception:
+            pass # Fall through to raw data if AI fails
             
-            data = json.loads(response_text)
-            # Ensure valid category
-            valid_cats = ['electronics', 'clothing', 'food', 'home', 'vehicle', 'beauty', 'sports', 'books', 'other']
-            if data.get('category') not in valid_cats: data['category'] = 'other'
-            return data
-        except Exception as e:
-            logger.warning(f"Gemini categorization failed, using raw DB info: {e}")
-            return {
-                "product_name": db_info['product_name'],
-                "brand": db_info['brand'],
-                "category": "other",
-                "details": db_info['details'][:100] if db_info['details'] else ""
-            }
+        return {
+            "product_name": db_info['product_name'],
+            "brand": db_info['brand'] or "",
+            "category": "other",
+            "details": db_info['details'][:100] if db_info['details'] else ""
+        }
 
-    # 3. Fallback: Pure AI Lookup (Original Logic)
-    logger.info(f"Barcode {barcode} not in DB. Falling back to pure AI lookup.")
-    prompt = f"""Identify the product for barcode: {barcode}.
-    Return a JSON object with:
-    - product_name
-    - brand
-    - category (one of: electronics, clothing, food, home, vehicle, beauty, sports, books, other)
-    - details (1 sentence description)
+    # 2. Fallback: Aggressive AI Lookup
+    logger.info(f"Barcode {barcode} not in DB. Using aggressive AI identification.")
+    prompt = f"""You are an expert product identifier. Identify the product for barcode: {barcode}.
     
-    If you are NOT sure, return null for product_name.
-    JSON ONLY:"""
+    Even if you are not 100% sure, provide your BEST GUESS based on the barcode number prefixes and internal knowledge.
+    
+    Return EXACTLY this JSON format:
+    {{
+      "product_name": "Product Name",
+      "brand": "Brand Name",
+      "category": "one of: electronics, clothing, food, home, vehicle, beauty, sports, books, other",
+      "details": "1-sentence description"
+    }}
+    
+    If absolutely impossible to determine, use the barcode as the product name.
+    """
 
     try:
         model = genai.GenerativeModel('gemini-2.0-flash')
         response = await asyncio.to_thread(model.generate_content, prompt)
-        response_text = response.text
-        if "```" in response_text:
-            response_text = re.sub(r'```[a-zA-Z]*\n?', '', response_text).strip()
-            
-        data = json.loads(response_text)
-        valid_cats = ['electronics', 'clothing', 'food', 'home', 'vehicle', 'beauty', 'sports', 'books', 'other']
-        if data.get('category') not in valid_cats: data['category'] = 'other'
-        return data
+        data = extract_json(response.text)
+        if data:
+            valid_cats = ['electronics', 'clothing', 'food', 'home', 'vehicle', 'beauty', 'sports', 'books', 'other']
+            if data.get('category') not in valid_cats: data['category'] = 'other'
+            return data
     except Exception as e:
-        logger.error(f"Hybrid resolution failed: {e}")
-        return {
-            "product_name": None,
-            "brand": None,
-            "category": "other",
-            "details": f"Identification failed for {barcode}"
-        }
+        logger.error(f"AI identification failed: {e}")
+        
+    return {
+        "product_name": f"Product {barcode}",
+        "brand": "",
+        "category": "other",
+        "details": f"Scan for {barcode}"
+    }
 
 # Routes
 @api_router.post("/auth/register")
@@ -995,6 +1003,26 @@ async def analyze_barcode(barcode: str, current_user: User = Depends(get_current
         raise HTTPException(status_code=404, detail="Product not identified from barcode")
     return info
 
+@api_router.post("/analysis/photo-path")
+async def analyze_photo_path(data: dict, current_user: User = Depends(get_current_user)):
+    file_path = data.get('file_path')
+    if not file_path or not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Photo file not found")
+        
+    try:
+        with open(file_path, "rb") as image_file:
+            image_base64 = base64.b64encode(image_file.read()).decode('utf-8')
+            
+        analysis = await analyze_image_unified(
+            image_base64,
+            region=current_user.region,
+            lifestyle=current_user.lifestyle_type
+        )
+        return analysis
+    except Exception as e:
+        logger.error(f"Failed to analyze photo path: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @api_router.get("/dashboard/stats")
 async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
     # Get all logs
@@ -1133,19 +1161,60 @@ async def upload_mobile_photo(session_id: str, file: UploadFile = File(...)):
     )
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Session not found")
-    return {"message": "Upload successful"}
+    mobile_sessions[session_id] = {
+        'status': 'active',
+        'barcode_data': None,
+        'photo_url': None,
+        'last_update': datetime.now(timezone.utc).isoformat(),
+        'created_at': datetime.now(timezone.utc)
+    }
+    return {"sessionId": session_id}
 
 @api_router.get("/mobile/status/{session_id}")
-async def get_mobile_session_status(session_id: str):
-    session = await db.mobile_sessions.find_one({"session_id": session_id}, {"_id": 0})
-    if not session:
+async def get_mobile_status(session_id: str):
+    if session_id not in mobile_sessions:
         raise HTTPException(status_code=404, detail="Session not found")
     
-    # Standardize result for frontend
-    if "created_at" in session and isinstance(session["created_at"], datetime):
-        session["created_at"] = session["created_at"].isoformat()
+    session = mobile_sessions[session_id]
+    
+    # Return everything including the timestamp for delta detection
+    return {
+        "status": session['status'],
+        "barcode_data": session['barcode_data'],
+        "photo_url": session['photo_url'],
+        "last_update": session['last_update']
+    }
+
+@api_router.post("/mobile/barcode/{session_id}")
+async def submit_mobile_barcode(session_id: str, data: dict):
+    if session_id not in mobile_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    mobile_sessions[session_id].update({
+        'barcode_data': data.get('barcode'),
+        'last_update': datetime.now(timezone.utc).isoformat()
+    })
+    return {"status": "success"}
+
+@api_router.post("/mobile/photo/{session_id}")
+async def submit_mobile_photo(session_id: str, file: UploadFile = File(...)):
+    if session_id not in mobile_sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    # Save the file to a temporary location or persistent storage
+    suffix = Path(file.filename).suffix
+    temp_fd, temp_path = tempfile.mkstemp(suffix=suffix)
+    os.close(temp_fd)
+    
+    with open(temp_path, "wb") as buffer:
+        content = await file.read()
+        buffer.write(content)
         
-    return session
+    mobile_sessions[session_id].update({
+        'photo_url': temp_path,
+        'last_update': datetime.now(timezone.utc).isoformat()
+    })
+    return {"status": "success", "file_path": temp_path}
 
 # Include router
 app.include_router(api_router)

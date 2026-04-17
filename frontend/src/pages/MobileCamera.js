@@ -48,6 +48,9 @@ const MobileCamera = () => {
     };
 
     if (success) {
+        // Reset success state after a delay to allow another upload
+        setTimeout(() => setSuccess(false), 3000);
+
         return (
             <div className="min-h-screen flex flex-col items-center justify-center bg-green-50 p-4 text-center">
                 <div className="bg-white p-8 rounded-2xl shadow-lg w-full max-w-sm">

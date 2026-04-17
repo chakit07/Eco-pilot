@@ -20,6 +20,7 @@ const PostPurchase = () => {
   const [method, setMethod] = useState('manual'); // 'manual', 'photo', 'mobile'
   const [mobileSessionId, setMobileSessionId] = useState(null);
   const [mobileStatus, setMobileStatus] = useState('waiting');
+  const [lastSyncTime, setLastSyncTime] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
   const [preview, setPreview] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -75,20 +76,21 @@ const PostPurchase = () => {
     }
   };
 
-  const checkMobileStatus = async (id = null) => {
-    const targetId = id || mobileSessionId;
+  const checkMobileStatus = async (targetId) => {
     if (!targetId) return;
-
     try {
       const response = await api.get(`/mobile/status/${targetId}`);
-      if (response.data.status === 'completed') {
+      
+      // Delta detection: Only process if there is a new update timestamp
+      if (response.data.last_update && response.data.last_update !== lastSyncTime) {
+        setLastSyncTime(response.data.last_update);
+        
+        // CASE 1: New Barcode
         if (response.data.barcode_data) {
           const barcode = response.data.barcode_data;
-          setFormData(prev => ({ ...prev, barcode: barcode }));
-          setMobileStatus('completed');
-          setMethod('manual'); // Switch to manual to show the populated barcode field
+          setFormData(prev => ({ ...prev, barcode }));
+          setMethod('manual');
           
-          // Auto-resolve barcode to product details
           toast.promise(
             api.get(`/analysis/barcode/${barcode}`),
             {
@@ -96,34 +98,46 @@ const PostPurchase = () => {
               success: (res) => {
                 setFormData(prev => ({
                   ...prev,
-                  product_name: res.data.product_name || prev.product_name,
-                  category: res.data.category || prev.category,
-                  product_details: res.data.details || prev.product_details
+                  product_name: res.data.product_name,
+                  category: res.data.category,
+                  product_details: res.data.details
                 }));
                 return `Detected: ${res.data.product_name}`;
               },
-              error: () => {
-                return 'Barcode received, but product not identified. Please enter name manually.';
-              }
+              error: 'Barcode received, but product info not found.'
             }
           );
-          return;
         }
 
-        if (response.data.image_data) {
-          const imageBase64 = response.data.image_data;
-          const blob = await (await fetch(`data:image/jpeg;base64,${imageBase64}`)).blob();
-          const file = new File([blob], "mobile-photo.jpg", { type: "image/jpeg" });
-
-          setSelectedFile(file);
-          setPreview(`data:image/jpeg;base64,${imageBase64}`);
+        // CASE 2: New Photo
+        if (response.data.photo_url) {
           setMobileStatus('completed');
-          setMethod('photo');
-          toast.success('Photo received from mobile!');
+          toast.promise(
+            api.post('/analysis/photo-path', { file_path: response.data.photo_url }),
+            {
+              loading: 'Analyzing mobile photo...',
+              success: (res) => {
+                setFormData(prev => ({
+                  ...prev,
+                  product_name: res.data.product_name,
+                  category: res.data.category,
+                  product_details: res.data.product_details,
+                  carbon_footprint: res.data.carbon_footprint,
+                  eco_score: res.data.eco_score,
+                  impact_details: res.data.impact_details,
+                  calculation: res.data.calculation,
+                  carbon_saved: res.data.carbon_saved
+                }));
+                setAnalysis(res.data);
+                return 'Photo analysis complete!';
+              },
+              error: 'Failed to analyze mobile photo.'
+            }
+          );
         }
       }
-    } catch (error) {
-      console.error('Polling error', error);
+    } catch (err) {
+      console.error('Polling error:', err);
     }
   };
 
