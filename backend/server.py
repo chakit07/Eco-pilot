@@ -6,6 +6,7 @@ import tempfile
 import uuid
 import re
 import json
+import httpx
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional
@@ -723,45 +724,107 @@ async def analyze_image(image_base64: str) -> dict:
 
     return result
 
+async def lookup_upcitemdb(barcode: str) -> Optional[dict]:
+    """Look up product details using UPCitemdb Trial API"""
+    url = "https://api.upcitemdb.com/prod/trial/lookup"
+    params = {'upc': barcode}
+    
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(url, params=params)
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('code') == 'OK' and data.get('items'):
+                    item = data['items'][0]
+                    return {
+                        "product_name": item.get('title'),
+                        "brand": item.get('brand'),
+                        "category": item.get('category') or item.get('type'),
+                        "details": item.get('description', '')
+                    }
+            elif response.status_code == 429:
+                logger.warning("UPCitemdb Rate Limit Exceeded (429)")
+    except Exception as e:
+        logger.error(f"UPCitemdb lookup error: {e}")
+    
+    return None
+
 async def resolve_barcode_info(barcode: str) -> dict:
-    """Use AI to identify product details from a barcode"""
-    prompt = f"""Identify the product for barcode (GTIN/UPC/EAN): {barcode}.
+    """Hybrid Resolve: UPCitemdb lookup first, then Gemini AI for categorization/fallback"""
     
-    You must return a JSON object with EXACTLY these fields:
-    - product_name: The clear, concise name of the product.
-    - brand: The manufacturer or brand name.
-    - category: One of [electronics, clothing, food, home, vehicle, beauty, sports, books, other].
-    - details: A brief 1-sentence description of the materials or key environmental factors for this product.
+    # 1. Try Database Lookup (UPCitemdb)
+    db_info = await lookup_upcitemdb(barcode)
     
-    If you are NOT sure about the product identity (at least 80% confidence), return null for product_name.
+    if db_info and db_info.get('product_name'):
+        logger.info(f"Barcode {barcode} found in UPCitemdb: {db_info['product_name']}")
+        
+        # 2. Use Gemini to "Standardize" the database response into our category format
+        prompt = f"""We found this product in a database:
+        Name: {db_info['product_name']}
+        Brand: {db_info['brand']}
+        Raw Category: {db_info['category']}
+        Description: {db_info['details']}
+        
+        Task: Map this product to EXACTLY one of these categories: [electronics, clothing, food, home, vehicle, beauty, sports, books, other].
+        
+        Return ONLY a JSON object with:
+        - product_name (clean it up if needed)
+        - brand
+        - category
+        - details (summarize to 1 sentence)
+        """
+        
+        try:
+            model = genai.GenerativeModel('gemini-2.0-flash')
+            response = await asyncio.to_thread(model.generate_content, prompt)
+            response_text = response.text
+            if "```" in response_text:
+                response_text = re.sub(r'```[a-zA-Z]*\n?', '', response_text).strip()
+            
+            data = json.loads(response_text)
+            # Ensure valid category
+            valid_cats = ['electronics', 'clothing', 'food', 'home', 'vehicle', 'beauty', 'sports', 'books', 'other']
+            if data.get('category') not in valid_cats: data['category'] = 'other'
+            return data
+        except Exception as e:
+            logger.warning(f"Gemini categorization failed, using raw DB info: {e}")
+            return {
+                "product_name": db_info['product_name'],
+                "brand": db_info['brand'],
+                "category": "other",
+                "details": db_info['details'][:100] if db_info['details'] else ""
+            }
+
+    # 3. Fallback: Pure AI Lookup (Original Logic)
+    logger.info(f"Barcode {barcode} not in DB. Falling back to pure AI lookup.")
+    prompt = f"""Identify the product for barcode: {barcode}.
+    Return a JSON object with:
+    - product_name
+    - brand
+    - category (one of: electronics, clothing, food, home, vehicle, beauty, sports, books, other)
+    - details (1 sentence description)
     
-    STRICT JSON ONLY RESPONSE:
-    """
+    If you are NOT sure, return null for product_name.
+    JSON ONLY:"""
 
     try:
         model = genai.GenerativeModel('gemini-2.0-flash')
         response = await asyncio.to_thread(model.generate_content, prompt)
         response_text = response.text
-        
-        # Clean markdown
         if "```" in response_text:
             response_text = re.sub(r'```[a-zA-Z]*\n?', '', response_text).strip()
             
         data = json.loads(response_text)
-        
-        # Validation
         valid_cats = ['electronics', 'clothing', 'food', 'home', 'vehicle', 'beauty', 'sports', 'books', 'other']
-        if data.get('category') not in valid_cats:
-            data['category'] = 'other'
-            
+        if data.get('category') not in valid_cats: data['category'] = 'other'
         return data
     except Exception as e:
-        logger.error(f"Barcode resolution failed: {e}")
+        logger.error(f"Hybrid resolution failed: {e}")
         return {
             "product_name": None,
             "brand": None,
             "category": "other",
-            "details": f"Identification failed for barcode {barcode}"
+            "details": f"Identification failed for {barcode}"
         }
 
 # Routes
