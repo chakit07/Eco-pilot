@@ -100,7 +100,8 @@ const PrePurchase = () => {
                   ...prev,
                   product_name: res.data.product_name,
                   category: res.data.category,
-                  product_details: res.data.details
+                  product_details: res.data.details,
+                  image_url: res.data.image_url
                 }));
                 return `Detected: ${res.data.product_name}`;
               },
@@ -124,7 +125,7 @@ const PrePurchase = () => {
                   ...prev,
                   product_name: res.data.product_name,
                   category: res.data.category,
-                  product_details: res.data.product_details,
+                  product_details: res.data.details || res.data.product_details,
                   carbon_footprint: res.data.carbon_footprint,
                   eco_score: res.data.eco_score,
                   impact_details: res.data.impact_details,
@@ -194,7 +195,8 @@ const PrePurchase = () => {
       const response = await api.post('/analysis/carbon', {
         product_name: formData.product_name,
         category: formData.category,
-        product_details: formData.product_details
+        product_details: formData.product_details,
+        image_url: formData.image_url || null
       });
       setAnalysis(response.data);
       toast.success('Analysis complete!');

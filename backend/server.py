@@ -165,6 +165,7 @@ class CarbonAnalysisRequest(BaseModel):
     product_name: str
     category: str
     product_details: Optional[str] = None
+    image_url: Optional[str] = None
 
 class DashboardStats(BaseModel):
     total_logs: int
@@ -983,6 +984,10 @@ async def analyze_carbon(request: CarbonAnalysisRequest, current_user: User = De
         region=current_user.region,
         lifestyle=current_user.lifestyle_type
     )
+    # Echo back the image_url if provided to maintain state on frontend
+    if request.image_url:
+        analysis['image_url'] = request.image_url
+        
     return analysis
 
 @api_router.post("/analysis/photo")
