@@ -736,11 +736,14 @@ async def lookup_upcitemdb(barcode: str) -> Optional[dict]:
                 data = response.json()
                 if data.get('code') == 'OK' and data.get('items'):
                     item = data['items'][0]
+                    images = item.get('images', [])
+                    image_url = images[0] if images else None
                     return {
                         "product_name": item.get('title'),
                         "brand": item.get('brand'),
                         "category": item.get('category') or item.get('type'),
-                        "details": item.get('description', '')
+                        "details": item.get('description', ''),
+                        "image_url": image_url
                     }
             elif response.status_code == 429:
                 logger.warning("UPCitemdb Rate Limit Exceeded (429)")
@@ -797,7 +800,8 @@ async def resolve_barcode_info(barcode: str) -> dict:
             "product_name": db_info['product_name'],
             "brand": db_info['brand'] or "",
             "category": "other",
-            "details": db_info['details'][:100] if db_info['details'] else ""
+            "details": db_info['details'][:100] if db_info['details'] else "",
+            "image_url": db_info.get('image_url')
         }
 
     # 2. Fallback: Aggressive AI Lookup

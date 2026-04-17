@@ -490,7 +490,23 @@ const PrePurchase = () => {
         {analysis && (
           <div className="mt-8 space-y-6 fade-in">
             <div className="card bg-gradient-to-br from-green-50 to-emerald-50">
-              <h3 className="text-2xl font-bold text-green-800 mb-4">Analysis Results</h3>
+              <div className="flex flex-col sm:flex-row justify-between items-start gap-6 mb-8">
+                <div>
+                  <h3 className="text-2xl font-bold text-green-800 mb-2">Analysis Results</h3>
+                  <p className="text-sm text-green-600 font-medium">Detailed environmental footprint for {analysis.product_name || formData.product_name}</p>
+                </div>
+                
+                {(preview || analysis.image_url) && (
+                  <div className="w-full sm:w-48 h-48 rounded-2xl overflow-hidden shadow-xl border-4 border-white transform hover:scale-105 transition-transform duration-500 shrink-0">
+                    <img 
+                      src={preview || analysis.image_url} 
+                      alt="Product" 
+                      className="w-full h-full object-cover"
+                      onError={(e) => e.target.style.display = 'none'}
+                    />
+                  </div>
+                )}
+              </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 mb-8">
                 {/* KPI Card: Carbon Footprint */}
