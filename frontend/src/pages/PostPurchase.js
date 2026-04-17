@@ -61,7 +61,7 @@ const PostPurchase = () => {
     let interval;
     const pollingNeeded = !isMobile && mobileSessionId && mobileStatus === 'waiting' && (method === 'mobile' || method === 'photo');
     if (pollingNeeded) {
-      interval = setInterval(checkMobileStatus, 2000);
+      interval = setInterval(checkMobileStatus, 1000);
     }
     return () => clearInterval(interval);
   }, [mobileSessionId, mobileStatus, method, isMobile]);

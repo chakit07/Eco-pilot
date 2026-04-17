@@ -21,9 +21,9 @@ class EcoPilotAPITester:
         self.tests_run += 1
         if success:
             self.tests_passed += 1
-            print(f"✅ {name} - PASSED")
+            print(f"[PASS] {name} - PASSED")
         else:
-            print(f"❌ {name} - FAILED: {details}")
+            print(f"[FAIL] {name} - FAILED: {details}")
         
         self.test_results.append({
             "test": name,
@@ -42,7 +42,7 @@ class EcoPilotAPITester:
         if files:
             headers.pop('Content-Type', None)  # Let requests set it for multipart
 
-        print(f"\n🔍 Testing {name}...")
+        print(f"\n[SCAN] Testing {name}...")
         
         try:
             if method == 'GET':
@@ -258,7 +258,7 @@ class EcoPilotAPITester:
 
     def run_all_tests(self):
         """Run all API tests"""
-        print("🚀 Starting EcoPilot API Tests...")
+        print("Starting EcoPilot API Tests...")
         print(f"Testing against: {self.api_url}")
         
         # Test user registration and login
@@ -294,18 +294,18 @@ class EcoPilotAPITester:
 
     def generate_report(self):
         """Generate test report"""
-        print(f"\n📊 Test Results: {self.tests_passed}/{self.tests_run} passed")
+        print(f"\n[STATS] Test Results: {self.tests_passed}/{self.tests_run} passed")
         
         if self.tests_passed == self.tests_run:
-            print("🎉 All tests passed!")
+            print("OK: All tests passed!")
             return 0
         else:
-            print("⚠️  Some tests failed. Check the details above.")
+            print("WARN: Some tests failed. Check the details above.")
             
             # Print failed tests summary
             failed_tests = [t for t in self.test_results if not t['success']]
             if failed_tests:
-                print("\n❌ Failed Tests:")
+                print("\n[FAIL] Failed Tests:")
                 for test in failed_tests:
                     print(f"  - {test['test']}: {test['details']}")
             

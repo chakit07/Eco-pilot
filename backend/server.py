@@ -257,9 +257,7 @@ async def analyze_carbon_footprint(product_name: str, category: str, details: st
         last_err = ""
         model_names = [
             'gemini-2.0-flash',           # Primary: High efficiency
-            'gemini-flash-latest',        # Reliable alias
-            'models/gemini-2.0-flash',    # Explicit path
-            'models/gemini-flash-latest', # Explicit path
+            'gemini-flash-latest',        # Reliable alias fallback
             'gemini-pro-latest'           # High-accuracy fallback
         ]
         
@@ -276,8 +274,8 @@ async def analyze_carbon_footprint(product_name: str, category: str, details: st
                         break
                     except Exception as e:
                         if "429" in str(e) and attempt == 0:
-                            logger.warning(f"429 hit for {model_name}. Retrying in 2 seconds...")
-                            await asyncio.sleep(2)
+                            logger.warning(f"429 hit for {model_name}. Retrying in 0.5 seconds...")
+                            await asyncio.sleep(0.5)
                             continue
                         raise e
                 
@@ -485,8 +483,7 @@ async def analyze_image_unified(image_base64: str, region: str = "Global", lifes
         model_names = [
             'gemini-2.0-flash', 
             'gemini-flash-latest', 
-            'models/gemini-2.0-flash', 
-            'models/gemini-flash-latest'
+            'gemini-pro-latest'
         ]
         
         for model_name in model_names:
@@ -730,7 +727,7 @@ async def lookup_upcitemdb(barcode: str) -> Optional[dict]:
     params = {'upc': barcode}
     
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.get(url, params=params)
             if response.status_code == 200:
                 data = response.json()
