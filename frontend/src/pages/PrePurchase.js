@@ -83,9 +83,30 @@ const PrePurchase = () => {
       const response = await api.get(`/mobile/status/${targetId}`);
       if (response.data.status === 'completed') {
         if (response.data.barcode_data) {
-          setFormData(prev => ({ ...prev, barcode: response.data.barcode_data }));
+          const barcode = response.data.barcode_data;
+          setFormData(prev => ({ ...prev, barcode: barcode }));
           setMobileStatus('completed');
-          toast.success('Barcode received from mobile!');
+          setMethod('manual'); // Switch to manual to show the populated barcode field
+          
+          // Auto-resolve barcode to product details
+          toast.promise(
+            api.get(`/analysis/barcode/${barcode}`),
+            {
+              loading: 'Resolving barcode details...',
+              success: (res) => {
+                setFormData(prev => ({
+                  ...prev,
+                  product_name: res.data.product_name || prev.product_name,
+                  category: res.data.category || prev.category,
+                  product_details: res.data.details || prev.product_details
+                }));
+                return `Detected: ${res.data.product_name}`;
+              },
+              error: () => {
+                return 'Barcode received, but product not identified. Please enter name manually.';
+              }
+            }
+          );
           return;
         }
 

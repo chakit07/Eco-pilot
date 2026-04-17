@@ -5,6 +5,7 @@ import os
 import tempfile
 import uuid
 import re
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional
@@ -59,6 +60,13 @@ except Exception as e:
 
 # Create the main app
 app = FastAPI()
+
+# Database initialization
+@app.on_event("startup")
+async def startup_db_client():
+    # Setup TTL index for mobile sessions (expire after 30 mins)
+    await db.mobile_sessions.create_index("created_at", expireAfterSeconds=1800)
+    logger.info("MongoDB TTL index for mobile_sessions verified.")
 
 # CORS Configuration
 cors_origins = os.environ.get('CORS_ORIGINS', 'http://localhost:3000,http://127.0.0.1:3000,http://192.168.1.15:3000').split(',')
@@ -715,6 +723,47 @@ async def analyze_image(image_base64: str) -> dict:
 
     return result
 
+async def resolve_barcode_info(barcode: str) -> dict:
+    """Use AI to identify product details from a barcode"""
+    prompt = f"""Identify the product for barcode (GTIN/UPC/EAN): {barcode}.
+    
+    You must return a JSON object with EXACTLY these fields:
+    - product_name: The clear, concise name of the product.
+    - brand: The manufacturer or brand name.
+    - category: One of [electronics, clothing, food, home, vehicle, beauty, sports, books, other].
+    - details: A brief 1-sentence description of the materials or key environmental factors for this product.
+    
+    If you are NOT sure about the product identity (at least 80% confidence), return null for product_name.
+    
+    STRICT JSON ONLY RESPONSE:
+    """
+
+    try:
+        model = genai.GenerativeModel('gemini-2.0-flash')
+        response = await asyncio.to_thread(model.generate_content, prompt)
+        response_text = response.text
+        
+        # Clean markdown
+        if "```" in response_text:
+            response_text = re.sub(r'```[a-zA-Z]*\n?', '', response_text).strip()
+            
+        data = json.loads(response_text)
+        
+        # Validation
+        valid_cats = ['electronics', 'clothing', 'food', 'home', 'vehicle', 'beauty', 'sports', 'books', 'other']
+        if data.get('category') not in valid_cats:
+            data['category'] = 'other'
+            
+        return data
+    except Exception as e:
+        logger.error(f"Barcode resolution failed: {e}")
+        return {
+            "product_name": None,
+            "brand": None,
+            "category": "other",
+            "details": f"Identification failed for barcode {barcode}"
+        }
+
 # Routes
 @api_router.post("/auth/register")
 async def register(user_data: UserCreate):
@@ -876,6 +925,13 @@ async def analyze_photo(file: UploadFile = File(...), current_user: User = Depen
     
     return analysis
 
+@api_router.get("/analysis/barcode/{barcode}")
+async def analyze_barcode(barcode: str, current_user: User = Depends(get_current_user)):
+    info = await resolve_barcode_info(barcode)
+    if not info.get('product_name'):
+        raise HTTPException(status_code=404, detail="Product not identified from barcode")
+    return info
+
 @api_router.get("/dashboard/stats")
 async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
     # Get all logs
@@ -972,51 +1028,61 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
         'savings_history': savings_history
     }
 
-# Temporary storage for mobile upload sessions (in-memory)
-upload_sessions = {}
-
-class MobileUploadInit(BaseModel):
-    pass
-
 @api_router.post("/mobile/init")
 async def init_mobile_session():
     session_id = str(uuid.uuid4())
-    upload_sessions[session_id] = {"status": "waiting", "image_data": None, "barcode_data": None}
+    session_doc = {
+        "session_id": session_id,
+        "status": "waiting",
+        "image_data": None,
+        "barcode_data": None,
+        "created_at": datetime.now(timezone.utc)
+    }
+    await db.mobile_sessions.insert_one(session_doc)
     return {"session_id": session_id}
 
 @api_router.post("/mobile/barcode/{session_id}")
 async def submit_mobile_barcode(session_id: str, request: dict):
-    if session_id not in upload_sessions:
+    result = await db.mobile_sessions.update_one(
+        {"session_id": session_id},
+        {"$set": {
+            "status": "completed",
+            "barcode_data": request.get('barcode'),
+            "image_data": None
+        }}
+    )
+    if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Session not found")
-    
-    upload_sessions[session_id] = {
-        "status": "completed", 
-        "barcode_data": request.get('barcode'),
-        "image_data": None
-    }
     return {"message": "Barcode submitted successfully"}
 
 @api_router.post("/mobile/upload/{session_id}")
 async def upload_mobile_photo(session_id: str, file: UploadFile = File(...)):
-    if session_id not in upload_sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
-    
     contents = await file.read()
     image_base64 = base64.b64encode(contents).decode('utf-8')
     
-    upload_sessions[session_id] = {
-        "status": "completed", 
-        "image_data": image_base64,
-        "barcode_data": None
-    }
+    result = await db.mobile_sessions.update_one(
+        {"session_id": session_id},
+        {"$set": {
+            "status": "completed",
+            "image_data": image_base64,
+            "barcode_data": None
+        }}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Session not found")
     return {"message": "Upload successful"}
 
 @api_router.get("/mobile/status/{session_id}")
 async def get_mobile_session_status(session_id: str):
-    if session_id not in upload_sessions:
+    session = await db.mobile_sessions.find_one({"session_id": session_id}, {"_id": 0})
+    if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     
-    return upload_sessions[session_id]
+    # Standardize result for frontend
+    if "created_at" in session and isinstance(session["created_at"], datetime):
+        session["created_at"] = session["created_at"].isoformat()
+        
+    return session
 
 # Include router
 app.include_router(api_router)
