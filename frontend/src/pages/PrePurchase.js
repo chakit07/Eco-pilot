@@ -112,7 +112,9 @@ const PrePurchase = () => {
         // CASE 2: New Photo
         if (response.data.image_data) {
           setMobileStatus('completed');
+          setMethod('photo'); // Switch to photo mode to show the preview
           setPreview(`data:image/jpeg;base64,${response.data.image_data}`);
+          
           toast.promise(
             api.post('/analysis/photo-base64', { image_data: response.data.image_data }),
             {
