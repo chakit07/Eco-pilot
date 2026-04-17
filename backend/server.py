@@ -804,7 +804,10 @@ async def resolve_barcode_info(barcode: str) -> dict:
     logger.info(f"Barcode {barcode} not in DB. Using aggressive AI identification.")
     prompt = f"""You are an expert product identifier. Identify the product for barcode: {barcode}.
     
-    Even if you are not 100% sure, provide your BEST GUESS based on the barcode number prefixes and internal knowledge.
+    GUIDELINES:
+    1. Use the barcode number digits (e.g., EAN/UPC prefixes) to determine country of origin and likely product type.
+    2. Search your internal knowledge base for this specific global barcode number.
+    3. Even if you are not 100% sure, provide your BEST GUESS based on common product numbering patterns.
     
     Return EXACTLY this JSON format:
     {{

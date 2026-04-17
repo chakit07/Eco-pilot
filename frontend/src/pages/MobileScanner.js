@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Html5Qrcode } from 'html5-qrcode';
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import api from '@/lib/api';
 import { toast } from 'sonner';
@@ -16,6 +16,7 @@ const MobileScanner = () => {
     const [currentCameraIndex, setCurrentCameraIndex] = useState(0);
     const [debugInfo, setDebugInfo] = useState("");
     const [showDebug, setShowDebug] = useState(false);
+    const [lastScannedCode, setLastScannedCode] = useState(null);
 
     const query = new URLSearchParams(location.search);
     const type = query.get('type');
@@ -77,13 +78,23 @@ const MobileScanner = () => {
                     }
                 }
 
-                // Step 2: Minimalist Config
+                // Step 2: Optimal configuration for product barcodes
                 const config = {
-                    fps: 10,
+                    fps: 20, // Faster scanning
                     qrbox: (viewWidth, viewHeight) => {
                         const size = Math.min(viewWidth, viewHeight) * 0.7;
                         return { width: size, height: size };
-                    }
+                    },
+                    aspectRatio: 1.0,
+                    formatsToSupport: [
+                        Html5QrcodeSupportedFormats.EAN_13,
+                        Html5QrcodeSupportedFormats.EAN_8,
+                        Html5QrcodeSupportedFormats.UPC_A,
+                        Html5QrcodeSupportedFormats.UPC_E,
+                        Html5QrcodeSupportedFormats.UPC_EAN_EXTENSION,
+                        Html5QrcodeSupportedFormats.CODE_128,
+                        Html5QrcodeSupportedFormats.QR_CODE
+                    ]
                 };
 
                 // Step 3: THE FIX - Start with facingMode directly if it's the first attempt
@@ -164,6 +175,9 @@ const MobileScanner = () => {
             }
 
             setScanning(false);
+            setSuccess(true);
+            setLastScannedCode(decodedText);
+            
             await api.post(`/mobile/barcode/${sessionId}`, {
                 barcode: decodedText
             });
@@ -275,8 +289,12 @@ const MobileScanner = () => {
                                 <CheckCircle2 className="w-14 h-14 text-white" />
                             </div>
                             <h2 className="text-2xl font-black text-white mb-2 tracking-tight uppercase">SUCCESS!</h2>
+                            <div className="bg-green-500/10 border border-green-500/30 px-6 py-3 rounded-2xl mb-6">
+                                <p className="text-slate-400 text-[10px] uppercase font-black tracking-widest mb-1">Scanned Code</p>
+                                <p className="text-white font-mono text-xl font-bold tracking-wider">{lastScannedCode}</p>
+                            </div>
                             <p className="text-slate-400 text-sm mb-6 max-w-[200px]">
-                                Barcode data synced to your computer.
+                                This product data has been synced to your computer.
                             </p>
                             <div className="bg-slate-800/50 border border-slate-700 px-4 py-2 rounded-lg">
                                 <p className="text-green-500 font-bold text-[10px] uppercase tracking-widest">
