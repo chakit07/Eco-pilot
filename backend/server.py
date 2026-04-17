@@ -1023,6 +1023,19 @@ async def analyze_photo_path(data: dict, current_user: User = Depends(get_curren
         logger.error(f"Failed to analyze photo path: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@api_router.post("/analysis/photo-base64")
+async def analyze_photo_base64(data: dict, current_user: User = Depends(get_current_user)):
+    image_base64 = data.get('image_data')
+    if not image_base64:
+        raise HTTPException(status_code=400, detail="Image data missing")
+        
+    analysis = await analyze_image_unified(
+        image_base64,
+        region=current_user.region,
+        lifestyle=current_user.lifestyle_type
+    )
+    return analysis
+
 @api_router.get("/dashboard/stats")
 async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
     # Get all logs
@@ -1127,24 +1140,27 @@ async def init_mobile_session():
         "status": "waiting",
         "image_data": None,
         "barcode_data": None,
+        "last_update": datetime.now(timezone.utc).isoformat(),
         "created_at": datetime.now(timezone.utc)
     }
     await db.mobile_sessions.insert_one(session_doc)
     return {"session_id": session_id}
 
 @api_router.post("/mobile/barcode/{session_id}")
-async def submit_mobile_barcode(session_id: str, request: dict):
+async def submit_mobile_barcode(session_id: str, data: dict):
+    # Support both 'barcode' and direct dict
+    barcode = data.get('barcode', data.get('barcode_data'))
+    
     result = await db.mobile_sessions.update_one(
         {"session_id": session_id},
         {"$set": {
-            "status": "completed",
-            "barcode_data": request.get('barcode'),
-            "image_data": None
+            "barcode_data": barcode,
+            "last_update": datetime.now(timezone.utc).isoformat()
         }}
     )
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Session not found")
-    return {"message": "Barcode submitted successfully"}
+    return {"status": "success"}
 
 @api_router.post("/mobile/upload/{session_id}")
 async def upload_mobile_photo(session_id: str, file: UploadFile = File(...)):
@@ -1154,67 +1170,26 @@ async def upload_mobile_photo(session_id: str, file: UploadFile = File(...)):
     result = await db.mobile_sessions.update_one(
         {"session_id": session_id},
         {"$set": {
-            "status": "completed",
             "image_data": image_base64,
-            "barcode_data": None
+            "barcode_data": None,
+            "last_update": datetime.now(timezone.utc).isoformat()
         }}
     )
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Session not found")
-    mobile_sessions[session_id] = {
-        'status': 'active',
-        'barcode_data': None,
-        'photo_url': None,
-        'last_update': datetime.now(timezone.utc).isoformat(),
-        'created_at': datetime.now(timezone.utc)
-    }
-    return {"sessionId": session_id}
+    return {"status": "success"}
 
 @api_router.get("/mobile/status/{session_id}")
 async def get_mobile_status(session_id: str):
-    if session_id not in mobile_sessions:
+    session = await db.mobile_sessions.find_one({"session_id": session_id}, {"_id": 0})
+    if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     
-    session = mobile_sessions[session_id]
-    
-    # Return everything including the timestamp for delta detection
-    return {
-        "status": session['status'],
-        "barcode_data": session['barcode_data'],
-        "photo_url": session['photo_url'],
-        "last_update": session['last_update']
-    }
-
-@api_router.post("/mobile/barcode/{session_id}")
-async def submit_mobile_barcode(session_id: str, data: dict):
-    if session_id not in mobile_sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
-    
-    mobile_sessions[session_id].update({
-        'barcode_data': data.get('barcode'),
-        'last_update': datetime.now(timezone.utc).isoformat()
-    })
-    return {"status": "success"}
-
-@api_router.post("/mobile/photo/{session_id}")
-async def submit_mobile_photo(session_id: str, file: UploadFile = File(...)):
-    if session_id not in mobile_sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
-    
-    # Save the file to a temporary location or persistent storage
-    suffix = Path(file.filename).suffix
-    temp_fd, temp_path = tempfile.mkstemp(suffix=suffix)
-    os.close(temp_fd)
-    
-    with open(temp_path, "wb") as buffer:
-        content = await file.read()
-        buffer.write(content)
+    # Standardize result for frontend
+    if "created_at" in session and isinstance(session["created_at"], datetime):
+        session["created_at"] = session["created_at"].isoformat()
         
-    mobile_sessions[session_id].update({
-        'photo_url': temp_path,
-        'last_update': datetime.now(timezone.utc).isoformat()
-    })
-    return {"status": "success", "file_path": temp_path}
+    return session
 
 # Include router
 app.include_router(api_router)

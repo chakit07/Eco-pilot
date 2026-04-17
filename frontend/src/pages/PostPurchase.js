@@ -110,10 +110,11 @@ const PostPurchase = () => {
         }
 
         // CASE 2: New Photo
-        if (response.data.photo_url) {
+        if (response.data.image_data) {
           setMobileStatus('completed');
+          setPreview(`data:image/jpeg;base64,${response.data.image_data}`);
           toast.promise(
-            api.post('/analysis/photo-path', { file_path: response.data.photo_url }),
+            api.post('/analysis/photo-base64', { image_data: response.data.image_data }),
             {
               loading: 'Analyzing mobile photo...',
               success: (res) => {
